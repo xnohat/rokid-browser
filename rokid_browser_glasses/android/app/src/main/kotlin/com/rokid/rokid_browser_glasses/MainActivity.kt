@@ -26,10 +26,10 @@ import org.json.JSONObject
 
 class MainActivity : FlutterActivity() {
 
-    private val EVENT_CHANNEL  = "com.rokid.rokid_browser_glasses/events"
-    private val METHOD_CHANNEL = "com.rokid.rokid_browser_glasses/methods"
+    private val EVENT_CHANNEL  = "com.snorlytics.browser_glasses/events"
+    private val METHOD_CHANNEL = "com.snorlytics.browser_glasses/methods"
 
-    private var btClient: BrowserBtClient? = null
+    private var btClient: BrowserBleServer? = null
     @Volatile private var eventSink: EventChannel.EventSink? = null
     private val mainHandler = Handler(Looper.getMainLooper())
     private var passthroughView: android.view.View? = null
@@ -434,26 +434,20 @@ class MainActivity : FlutterActivity() {
                 eventSink = events
 
                 if (btClient == null) {
-                    val btAdapter = try {
-                        (getSystemService(BLUETOOTH_SERVICE) as BluetoothManager).adapter
-                    } catch (e: Exception) { null }
-
-                    if (btAdapter != null) {
-                        btClient = BrowserBtClient(
-                            adapter   = btAdapter,
-                            onMessage = { json ->
-                                runOnUiThread { eventSink?.success(json) }
-                            },
-                            onStatus  = { status ->
-                                val statusJson = JSONObject()
-                                    .put("type", "bt_status")
-                                    .put("status", status)
-                                    .toString()
-                                runOnUiThread { eventSink?.success(statusJson) }
-                            }
-                        )
-                        btClient?.start()
-                    }
+                    btClient = BrowserBleServer(
+                        context   = applicationContext,
+                        onMessage = { json ->
+                            runOnUiThread { eventSink?.success(json) }
+                        },
+                        onStatus  = { status ->
+                            val statusJson = JSONObject()
+                                .put("type", "bt_status")
+                                .put("status", status)
+                                .toString()
+                            runOnUiThread { eventSink?.success(statusJson) }
+                        }
+                    )
+                    btClient?.start()
                 }
 
                 // Report WiFi state immediately so phone UI is current on connect
