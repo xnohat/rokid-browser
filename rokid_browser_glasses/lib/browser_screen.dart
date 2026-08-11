@@ -137,9 +137,9 @@ class _BrowserScreenState extends State<BrowserScreen> {
   m.content='width=device-width,initial-scale=1.0,maximum-scale=5.0,minimum-scale=0.1';
   document.querySelectorAll('video').forEach(function(v){v.muted=false;if(v.volume>0.5)v.volume=0.5;});
 })();''');
-          // New page loads at 100% (WebView resets pinch scale on navigation).
-          _pageZoom = 1.0;
-          _methodChannel.invokeMethod('resetZoom').catchError((_) {});
+          // Re-apply the user's zoom level to the new page (reflow-zoom via the
+          // viewport width). If never zoomed, this is a no-op at 100%.
+          if (_pageZoom != 1.0) _applyZoom();
           // Reserve the HUD strip INSIDE the page (the WebView itself is full-screen
           // and sits UNDER the address bar). A persistent scroll-padding + a spacer
           // push the page content below the address bar so it is never overlapped,
@@ -242,8 +242,36 @@ class _BrowserScreenState extends State<BrowserScreen> {
   /// (settings.textZoom, in %) which reflows content to the viewport width —
   /// unlike CSS `body.zoom` which scaled the box and left black gaps / overflow.
   void _applyZoom() {
-    final pct = (_pageZoom * 100).round();
-    _methodChannel.invokeMethod('setTextZoom', pct).catchError((_) {});
+    // True reflow-zoom like a desktop browser: change the LAYOUT viewport width.
+    // The device screen is ~480 CSS px. If we tell the page the viewport is
+    // (480 / zoom) wide, the browser lays the page out at that width and then
+    // scales it to fill the screen — so content reflows to fit with NO sideways
+    // scroll. zoom>1 → narrower layout width → content looks bigger; zoom<1 →
+    // wider layout width → more content, smaller. Works even on sites that hard
+    // code width=device-width because we overwrite their viewport meta.
+    // CSS viewport width of this display is ~320 (480 physical px / 1.5 density).
+    // Lay the page out at (320 / zoom): zoom>1 → narrower layout → content bigger;
+    // zoom<1 → wider layout → more content, smaller. With useWideViewPort +
+    // loadWithOverviewMode, the WebView scales that layout width to fill the
+    // screen, so it reflows to fit with NO horizontal scroll. No initial-scale —
+    // that overrides the auto-fit and leaves black gaps.
+    final z = _pageZoom;
+    const baseWidth = 320;
+    final layoutWidth = (baseWidth / z).round();
+    _webController.runJavaScript('''
+(function(){
+  var m=document.querySelector('meta[name="viewport"]');
+  if(!m){m=document.createElement('meta');m.name='viewport';(document.head||document.documentElement).appendChild(m);}
+  m.setAttribute('content','width=$layoutWidth');
+  window.__rokidVW=$layoutWidth;
+  // Stop wide fixed-width elements from overflowing the (now narrower) layout so
+  // the page truly reflows to fit — no right-edge clipping.
+  var s=document.getElementById('__rokidZoomFit');
+  if(!s){s=document.createElement('style');s.id='__rokidZoomFit';(document.head||document.documentElement).appendChild(s);}
+  s.textContent='html,body{overflow-x:hidden !important;}'+
+    '*{max-width:100vw !important;}'+
+    'img,video,iframe,canvas{height:auto !important;}';
+})();''').catchError((_) {});
   }
 
   /// Robust scroll: many sites (incl. m.facebook.com) put the scrollable content
