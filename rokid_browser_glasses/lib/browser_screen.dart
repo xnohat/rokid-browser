@@ -227,6 +227,33 @@ class _BrowserScreenState extends State<BrowserScreen> {
   /// Push the page content below the top HUD/address strip by injecting a fixed
   /// spacer + top padding, so a full-screen WebView never has the address bar
   /// overlapping its content. Idempotent (safe to call on every page load).
+  /// Robust scroll: many sites (incl. m.facebook.com) put the scrollable content
+  /// in an inner element with its own overflow, not the window. Scroll the window
+  /// AND walk up from the cursor position to the nearest actually-scrollable
+  /// ancestor and scroll that too.
+  void _scrollPage(int dx, int dy) {
+    _webController.runJavaScript('''
+(function(){
+  var DX=$dx, DY=$dy;
+  window.scrollBy(DX,DY);
+  var se=document.scrollingElement||document.documentElement;
+  if(se)se.scrollTop+=DY, se.scrollLeft+=DX;
+  // Find a scrollable element near the cursor / center.
+  var cx=${_cursorX.toInt()}||Math.floor(window.innerWidth/2);
+  var cy=${_cursorY.toInt()}||Math.floor(window.innerHeight/2);
+  var el=document.elementFromPoint(cx,cy);
+  var guard=0;
+  while(el&&guard++<20){
+    var st=getComputedStyle(el);
+    var oy=st.overflowY, ox=st.overflowX;
+    var canY=(oy==='auto'||oy==='scroll')&&el.scrollHeight>el.clientHeight+2;
+    var canX=(ox==='auto'||ox==='scroll')&&el.scrollWidth>el.clientWidth+2;
+    if(canY||canX){ el.scrollTop+=DY; el.scrollLeft+=DX; break; }
+    el=el.parentElement;
+  }
+})()''');
+  }
+
   Future<void> _applyHudInset() async {
     // HUD is _kHudHeight logical px in Flutter; CSS px on this viewport match
     // closely enough. A touch of extra margin avoids clipping the first line.
@@ -238,17 +265,27 @@ class _BrowserScreenState extends State<BrowserScreen> {
   var s=document.getElementById('__rokidHudInset');
   if(!s){s=document.createElement('style');s.id='__rokidHudInset';document.head.appendChild(s);}
   s.textContent=
-    // Reserve the HUD strip at the top.
+    // Reserve the HUD strip at the top WITHOUT clipping height: a margin (not
+    // padding+border-box) so the body's own height is never capped, and the page
+    // can always grow taller than the viewport and scroll.
     'html{scroll-padding-top:'+H+'px !important;}'+
-    'body{padding-top:'+H+'px !important;box-sizing:border-box !important;}'+
-    // Never overflow horizontally (no sideways clipping), and always allow
-    // vertical scrolling when content is taller than the viewport.
+    'body{margin-top:'+H+'px !important;}'+
+    // Do NOT force any fixed/100vh height or overflow container on html/body — that
+    // is what traps tall pages and blocks scrolling. Only prevent sideways overflow.
     'html,body{max-width:100vw !important;overflow-x:hidden !important;'+
-      'overflow-y:auto !important;-webkit-overflow-scrolling:touch !important;}'+
-    // Media/images must not force the page wider than the screen.
+      'height:auto !important;min-height:0 !important;}'+
+    // Media must not force the page wider than the screen.
     'img,video,iframe,table,pre{max-width:100% !important;}';
-  // Make sure touch scrolling is not disabled by the site.
-  try{document.documentElement.style.setProperty('touch-action','pan-y','important');}catch(e){}
+  // Some sites lock scrolling via overflow:hidden on html/body or a fixed-position
+  // app shell. Undo that so the page scrolls.
+  try{
+    document.documentElement.style.setProperty('overflow-y','auto','important');
+    if(document.body){
+      document.body.style.setProperty('overflow-y','visible','important');
+      document.body.style.setProperty('position','static','important');
+    }
+    document.documentElement.style.setProperty('touch-action','pan-y','important');
+  }catch(e){}
 })();''');
     } catch (_) {}
   }
@@ -431,13 +468,13 @@ class _BrowserScreenState extends State<BrowserScreen> {
       case 'reload':
         _webController.reload();
       case 'scroll_down':
-        _webController.runJavaScript('window.scrollBy(0, 120)');
+        _scrollPage(0, 120);
       case 'scroll_up':
-        _webController.runJavaScript('window.scrollBy(0, -120)');
+        _scrollPage(0, -120);
       case 'scroll_left':
-        _webController.runJavaScript('window.scrollBy(-80, 0)');
+        _scrollPage(-80, 0);
       case 'scroll_right':
-        _webController.runJavaScript('window.scrollBy(80, 0)');
+        _scrollPage(80, 0);
       case 'zoom_in':
         _pageZoom = (_pageZoom + 0.1).clamp(0.3, 3.0);
         _webController.runJavaScript(
