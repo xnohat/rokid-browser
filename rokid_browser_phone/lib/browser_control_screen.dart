@@ -279,6 +279,37 @@ class _BrowserControlScreenState extends State<BrowserControlScreen> {
                 _sendThemeCmd(_glassesIsDark);
               },
             ),
+            // Big, obvious "Force reconnect" button whenever we are not connected.
+            if (!_isConnected)
+              Container(
+                width: double.infinity,
+                color: _c(context, const Color(0xFF0A0A0A), const Color(0xFFF5F5F5)),
+                padding: const EdgeInsets.fromLTRB(12, 4, 12, 10),
+                child: SizedBox(
+                  height: 48,
+                  child: ElevatedButton.icon(
+                    onPressed: _resetting ? null : _resetConnection,
+                    icon: _resetting
+                        ? const SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(
+                                strokeWidth: 2, color: Colors.white))
+                        : const Icon(Icons.bluetooth_searching, size: 20),
+                    label: Text(
+                      _resetting ? 'Đang kết nối lại…' : 'Kết nối lại kính',
+                      style: const TextStyle(
+                          fontSize: 15, fontWeight: FontWeight.w700),
+                    ),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.blueAccent,
+                      foregroundColor: Colors.white,
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12)),
+                    ),
+                  ),
+                ),
+              ),
             if (_currentTitle.isNotEmpty || _currentUrl.isNotEmpty)
               _PageInfoBar(
                 title: _currentTitle,

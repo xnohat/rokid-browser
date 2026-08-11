@@ -124,6 +124,7 @@ final class BleCentral: NSObject {
     func reset() {
         onStatus?("resetting")
         stopPing()
+        central.stopScan()
         if let p = peripheral {
             central.cancelPeripheralConnection(p)
         }
@@ -132,7 +133,20 @@ final class BleCentral: NSObject {
         rxChar = nil
         rxBuffer.removeAll()
         txQueue.removeAll(); txInFlight = false
-        if central.state == .poweredOn { beginScan() }
+        // Full clean slate so the "Kết nối lại kính" button always runs the whole
+        // discovery flow fresh (skip the system-cached peripheral once).
+        charDiscoverRetries = 0
+        reconnectAttempts = 0
+        scanningUnfiltered = false
+        skipRetrieveConnectedOnce = true
+        wantScan = true
+        dbg("manual reset -> fresh connect flow")
+        if central.state == .poweredOn {
+            // Small delay lets the cancel propagate before we rescan.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in
+                self?.beginScan()
+            }
+        }
     }
 
     func stop() {
