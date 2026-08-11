@@ -88,11 +88,13 @@ class _BrowserScreenState extends State<BrowserScreen> {
     _webController = WebViewController()
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
       ..addJavaScriptChannel('RokidFS', onMessageReceived: (msg) {
-        // The page reports HTML5 fullscreen enter/exit; hide the HUD while a
-        // video is fullscreen so it's truly edge-to-edge.
+        // The page reports a video going (near-)fullscreen; hide the HUD AND drop
+        // the in-page HUD inset so the video reaches the very top edge.
         final fs = msg.message == '1';
         if (mounted && fs != _videoFullscreen) {
           setState(() => _videoFullscreen = fs);
+          // 0 inset while fullscreen, restore _kHudHeight on exit.
+          _applyHudInset(fullscreen: fs);
         }
       })
       ..setBackgroundColor(_kBlack)
@@ -167,19 +169,35 @@ class _BrowserScreenState extends State<BrowserScreen> {
       for(var i=0;i<vs.length;i++){
         var v=vs[i]; if(v.paused||v.readyState<2) continue;
         var r=v.getBoundingClientRect();
-        // video covers >=85% width AND >=70% height => treat as fullscreen
-        if(r.width>=vw*0.85 && r.height>=vh*0.70) return true;
+        // Strong evidence for CSS "fullscreen": playing video covers ~90% width,
+        // ~75% height, and sits near the top-left edge.
+        if(r.width>=vw*0.90 && r.height>=vh*0.75 && r.top<=vh*0.15 && r.left<=vw*0.10) return true;
       }
       return false;
     }
     var _last=-1;
     function _rfs(){ var f=_bigVideo()?1:0; if(f!==_last){_last=f; try{RokidFS.postMessage(''+f);}catch(e){}} }
-    document.addEventListener('fullscreenchange',_rfs,true);
-    document.addEventListener('webkitfullscreenchange',_rfs,true);
-    document.addEventListener('play',_rfs,true);
-    document.addEventListener('pause',_rfs,true);
-    if(window.__rokidFSPoll) clearInterval(window.__rokidFSPoll);
-    window.__rokidFSPoll=setInterval(_rfs,700);
+    // Recheck ~300ms after an event too (Facebook animates the resize).
+    function _rfsSoon(){ _rfs(); setTimeout(_rfs,320); }
+    // EVENT-DRIVEN (no permanent polling → no CPU/heat): fullscreen API + play/
+    // pause/ended + a ResizeObserver on videos as they appear.
+    document.addEventListener('fullscreenchange',_rfsSoon,true);
+    document.addEventListener('webkitfullscreenchange',_rfsSoon,true);
+    document.addEventListener('play',_rfsSoon,true);
+    document.addEventListener('pause',_rfsSoon,true);
+    document.addEventListener('ended',_rfsSoon,true);
+    window.addEventListener('pagehide',function(){ try{RokidFS.postMessage('0');}catch(e){} });
+    var _ro=window.ResizeObserver?new ResizeObserver(_rfs):null;
+    function _watch(v){ if(_ro && !v.__rokidRO){v.__rokidRO=1; try{_ro.observe(v);}catch(e){}} }
+    document.querySelectorAll('video').forEach(_watch);
+    if(window.MutationObserver){
+      new MutationObserver(function(muts){
+        for(var i=0;i<muts.length;i++){var a=muts[i].addedNodes;
+          for(var j=0;j<a.length;j++){var n=a[j];
+            if(n.tagName==='VIDEO')_watch(n);
+            else if(n.querySelectorAll){n.querySelectorAll('video').forEach(_watch);}}}
+      }).observe(document.documentElement,{childList:true,subtree:true});
+    }
   }
 })();''');
           // Re-apply the user's zoom level to the freshly loaded page (no-op at 100%).
@@ -343,10 +361,12 @@ class _BrowserScreenState extends State<BrowserScreen> {
 })()''');
   }
 
-  Future<void> _applyHudInset() async {
+  Future<void> _applyHudInset({bool fullscreen = false}) async {
     // HUD is _kHudHeight logical px in Flutter; CSS px on this viewport match
     // closely enough. A touch of extra margin avoids clipping the first line.
-    const inset = 46;
+    // While a video is fullscreen the address bar is hidden, so reserve 0px — the
+    // page/video must reach the very top edge.
+    final inset = fullscreen ? 0 : 46;
     try {
       await _webController.runJavaScript('''
 (function(){
