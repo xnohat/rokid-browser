@@ -442,6 +442,11 @@ class _BrowserControlScreenState extends State<BrowserControlScreen> {
                         'type': 'browser_cmd',
                         'action': 'keyboard_enter',
                       }),
+                      onKey: (key) => _sendCmd({
+                        'type': 'browser_cmd',
+                        'action': 'keyboard_key',
+                        'key': key,
+                      }),
                     ),
                     const SizedBox(height: 28),
                     _SecurityControls(
@@ -1363,12 +1368,14 @@ class _KeyboardControls extends StatefulWidget {
   final void Function(String text) onType;
   final VoidCallback onBackspace;
   final VoidCallback onEnter;
+  final void Function(String key) onKey;
 
   const _KeyboardControls({
     required this.enabled,
     required this.onType,
     required this.onBackspace,
     required this.onEnter,
+    required this.onKey,
   });
 
   @override
@@ -1492,7 +1499,85 @@ class _KeyboardControlsState extends State<_KeyboardControls> {
             ),
           ],
         ),
+        const SizedBox(height: 10),
+        // Special keys: Tab + arrow keys, dispatched to the focused element / page.
+        Row(
+          children: [
+            Expanded(
+              child: _KeyButton(
+                label: 'Tab',
+                enabled: widget.enabled,
+                onPressed: () => widget.onKey('Tab'),
+              ),
+            ),
+            const SizedBox(width: 6),
+            Expanded(
+              child: _KeyButton(
+                icon: Icons.keyboard_arrow_left,
+                enabled: widget.enabled,
+                onPressed: () => widget.onKey('ArrowLeft'),
+              ),
+            ),
+            const SizedBox(width: 6),
+            Expanded(
+              child: _KeyButton(
+                icon: Icons.keyboard_arrow_up,
+                enabled: widget.enabled,
+                onPressed: () => widget.onKey('ArrowUp'),
+              ),
+            ),
+            const SizedBox(width: 6),
+            Expanded(
+              child: _KeyButton(
+                icon: Icons.keyboard_arrow_down,
+                enabled: widget.enabled,
+                onPressed: () => widget.onKey('ArrowDown'),
+              ),
+            ),
+            const SizedBox(width: 6),
+            Expanded(
+              child: _KeyButton(
+                icon: Icons.keyboard_arrow_right,
+                enabled: widget.enabled,
+                onPressed: () => widget.onKey('ArrowRight'),
+              ),
+            ),
+          ],
+        ),
       ],
+    );
+  }
+}
+
+// A compact key button for Tab / arrow keys.
+class _KeyButton extends StatelessWidget {
+  final String? label;
+  final IconData? icon;
+  final bool enabled;
+  final VoidCallback onPressed;
+
+  const _KeyButton({
+    this.label,
+    this.icon,
+    required this.enabled,
+    required this.onPressed,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      height: 44,
+      child: OutlinedButton(
+        onPressed: enabled ? onPressed : null,
+        style: OutlinedButton.styleFrom(
+          padding: EdgeInsets.zero,
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+        ),
+        child: label != null
+            ? Text(label!, style: const TextStyle(fontSize: 13))
+            : Icon(icon, size: 20),
+      ),
     );
   }
 }
