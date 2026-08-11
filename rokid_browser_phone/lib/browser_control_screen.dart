@@ -323,47 +323,12 @@ class _BrowserControlScreenState extends State<BrowserControlScreen> {
                 height: 1,
                 color: _c(context, const Color(0xFF1E1E1E),
                     const Color(0xFFE0E0E0))),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-              child: _UrlBar(
-                controller: _urlController,
-                onNavigate: _navigate,
-                enabled: _isConnected,
-              ),
-            ),
-            Divider(
-                height: 1,
-                color: _c(context, const Color(0xFF1E1E1E),
-                    const Color(0xFFE0E0E0))),
             Expanded(
               child: SingleChildScrollView(
                 padding: const EdgeInsets.all(16),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    if (_history.isNotEmpty) ...[
-                      _RecentPagesSection(
-                        history: _history,
-                        enabled: _isConnected,
-                        onNavigate: _navigate,
-                        onClear: () {
-                          setState(() => _history = []);
-                          _saveHistory();
-                        },
-                      ),
-                      const SizedBox(height: 20),
-                    ],
-                    _WifiCard(
-                      enabled: _wifiEnabled,
-                      ssid: _wifiSsid,
-                      rssi: _wifiRssi,
-                      toggling: _wifiToggling,
-                      connected: _isConnected,
-                      onToggle: _isConnected ? _toggleWifi : null,
-                      onAddNetwork:
-                          _isConnected ? _showWifiConnectDialog : null,
-                    ),
-                    const SizedBox(height: 20),
                     _NavControls(
                       canGoBack: _canGoBack,
                       canGoForward: _canGoForward,
@@ -447,6 +412,37 @@ class _BrowserControlScreenState extends State<BrowserControlScreen> {
                         'action': 'keyboard_key',
                         'key': key,
                       }),
+                    ),
+                    const SizedBox(height: 28),
+                    // Browse block (URL + Go, history, glasses wifi) moved here,
+                    // just above Security, per layout preference.
+                    _UrlBar(
+                      controller: _urlController,
+                      onNavigate: _navigate,
+                      enabled: _isConnected,
+                    ),
+                    const SizedBox(height: 20),
+                    if (_history.isNotEmpty) ...[
+                      _RecentPagesSection(
+                        history: _history,
+                        enabled: _isConnected,
+                        onNavigate: _navigate,
+                        onClear: () {
+                          setState(() => _history = []);
+                          _saveHistory();
+                        },
+                      ),
+                      const SizedBox(height: 20),
+                    ],
+                    _WifiCard(
+                      enabled: _wifiEnabled,
+                      ssid: _wifiSsid,
+                      rssi: _wifiRssi,
+                      toggling: _wifiToggling,
+                      connected: _isConnected,
+                      onToggle: _isConnected ? _toggleWifi : null,
+                      onAddNetwork:
+                          _isConnected ? _showWifiConnectDialog : null,
                     ),
                     const SizedBox(height: 28),
                     _SecurityControls(
