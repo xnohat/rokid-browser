@@ -41,7 +41,9 @@ class _BrowserScreenState extends State<BrowserScreen> {
   bool _cursorDragging = false;
   Timer? _cursorHideTimer;
 
-  double _pageZoom = 0.75;
+  // 1.0 = fill the viewport. CSS body.zoom<1 shrinks the page toward the top-left
+  // and leaves black gaps on the right/bottom, so we default to full size.
+  double _pageZoom = 1.0;
   bool _webViewConfigured = false;
   bool _isDark = true;
   Timer? _configRetryTimer;
@@ -232,8 +234,18 @@ class _BrowserScreenState extends State<BrowserScreen> {
   var H=$inset;
   var s=document.getElementById('__rokidHudInset');
   if(!s){s=document.createElement('style');s.id='__rokidHudInset';document.head.appendChild(s);}
-  s.textContent='html{scroll-padding-top:'+H+'px !important;}'+
-                'body{padding-top:'+H+'px !important;box-sizing:border-box !important;}';
+  s.textContent=
+    // Reserve the HUD strip at the top.
+    'html{scroll-padding-top:'+H+'px !important;}'+
+    'body{padding-top:'+H+'px !important;box-sizing:border-box !important;}'+
+    // Never overflow horizontally (no sideways clipping), and always allow
+    // vertical scrolling when content is taller than the viewport.
+    'html,body{max-width:100vw !important;overflow-x:hidden !important;'+
+      'overflow-y:auto !important;-webkit-overflow-scrolling:touch !important;}'+
+    // Media/images must not force the page wider than the screen.
+    'img,video,iframe,table,pre{max-width:100% !important;}';
+  // Make sure touch scrolling is not disabled by the site.
+  try{document.documentElement.style.setProperty('touch-action','pan-y','important');}catch(e){}
 })();''');
     } catch (_) {}
   }
