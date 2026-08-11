@@ -302,7 +302,7 @@ class MainActivity : FlutterActivity() {
                     // Lower actual panel brightness when dark mode is on — the only
                     // thing that genuinely cuts emitted light/heat on the waveguide
                     // for pages CSS can't darken (Facebook feed, iframes, canvas).
-                    setDimScrim(if (enable) 0.3f else 0f)
+                    setDimScrim(if (enable) 0.55f else 0f)
                     result.success(wv != null)
                 }
                 "setDim" -> {

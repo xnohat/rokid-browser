@@ -815,6 +815,10 @@ class _BrowserScreenState extends State<BrowserScreen> {
   else if(K==='ArrowLeft')window.scrollBy(-40,0);
 })()''');
         }
+      case 'set_dim':
+        // Manual brightness/dim control from the phone (0.0=normal .. 0.8=dimmest).
+        final v = (cmd['value'] as num?)?.toDouble() ?? 0.0;
+        _methodChannel.invokeMethod('setDim', v).catchError((_) {});
       case 'volume_up':
         _adjustMediaVolume(0.05);
       case 'volume_down':

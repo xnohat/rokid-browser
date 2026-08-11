@@ -52,6 +52,7 @@ class _BrowserControlScreenState extends State<BrowserControlScreen> {
   bool _canGoBack = false;
   bool _canGoForward = false;
   bool _glassesIsDark = true;
+  double _glassesDim = 0.55; // 0=full brightness .. 0.8=dimmest
   String _btStatus = 'listening';
   bool _resetting = false;
   bool _wifiEnabled = false;
@@ -443,6 +444,21 @@ class _BrowserControlScreenState extends State<BrowserControlScreen> {
                       onToggle: _isConnected ? _toggleWifi : null,
                       onAddNetwork:
                           _isConnected ? _showWifiConnectDialog : null,
+                    ),
+                    const SizedBox(height: 28),
+                    // Glasses brightness / dim — lower brightness cuts emitted light
+                    // and heat on the waveguide.
+                    _DimControls(
+                      enabled: _isConnected,
+                      value: _glassesDim,
+                      onChanged: (v) {
+                        setState(() => _glassesDim = v);
+                        _sendCmd({
+                          'type': 'browser_cmd',
+                          'action': 'set_dim',
+                          'value': v,
+                        });
+                      },
                     ),
                     const SizedBox(height: 28),
                     _SecurityControls(
@@ -1539,6 +1555,54 @@ class _KeyboardControlsState extends State<_KeyboardControls> {
               ),
             ),
           ],
+        ),
+      ],
+    );
+  }
+}
+
+// Glasses brightness / dim slider.
+class _DimControls extends StatelessWidget {
+  final bool enabled;
+  final double value;
+  final void Function(double) onChanged;
+
+  const _DimControls({
+    required this.enabled,
+    required this.value,
+    required this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final pct = (value * 100).round();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const _SectionLabel('Glasses brightness'),
+        const SizedBox(height: 4),
+        Row(
+          children: [
+            const Icon(Icons.brightness_low, size: 18),
+            Expanded(
+              child: Slider(
+                value: value,
+                min: 0.0,
+                max: 0.8,
+                divisions: 16,
+                label: 'Dim $pct%',
+                onChanged: enabled ? onChanged : null,
+              ),
+            ),
+            const Icon(Icons.brightness_high, size: 18),
+          ],
+        ),
+        Padding(
+          padding: const EdgeInsets.only(left: 4),
+          child: Text(
+            'Dim $pct% — kéo phải để tối & mát hơn',
+            style: const TextStyle(fontSize: 12, color: Color(0xFF888888)),
+          ),
         ),
       ],
     );
