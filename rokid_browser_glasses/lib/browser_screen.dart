@@ -947,6 +947,13 @@ class _BrowserScreenState extends State<BrowserScreen> {
         },
         child: Scaffold(
           backgroundColor: _kBlack,
+          // Fill the ENTIRE display, including the area under the system
+          // status/navigation bars (immersive). Without this the Scaffold shrinks
+          // the body by the nav-bar inset, leaving an un-painted strip at the
+          // bottom that shows as a black/white band on the waveguide.
+          resizeToAvoidBottomInset: false,
+          extendBody: true,
+          extendBodyBehindAppBar: true,
           // The WebView is kept FULL-SCREEN from first creation (a stable size the
           // Android VirtualDisplay/TextureView is happy with — resizing it after
           // creation produced a black band at the bottom). The HUD/address bar is
