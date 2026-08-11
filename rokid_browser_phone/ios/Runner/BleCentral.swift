@@ -129,6 +129,7 @@ final class BleCentral: NSObject {
     private func beginScan() {
         guard wantScan else { return }
         onStatus?("scanning")
+        NSLog("[BleCentral] beginScan for service")
         central.scanForPeripherals(withServices: [BleCentral.serviceUUID], options: nil)
     }
 
@@ -181,6 +182,7 @@ extension BleCentral: CBCentralManagerDelegate {
                         didDiscover peripheral: CBPeripheral,
                         advertisementData: [String: Any],
                         rssi RSSI: NSNumber) {
+        NSLog("[BleCentral] didDiscover \(peripheral.name ?? "?") rssi=\(RSSI)")
         central.stopScan()
         self.peripheral = peripheral
         peripheral.delegate = self
@@ -189,6 +191,7 @@ extension BleCentral: CBCentralManagerDelegate {
 
     func centralManager(_ central: CBCentralManager,
                         didConnect peripheral: CBPeripheral) {
+        NSLog("[BleCentral] didConnect -> discoverServices")
         maxWriteLen = peripheral.maximumWriteValueLength(for: .withoutResponse)
         peripheral.discoverServices([BleCentral.serviceUUID])
     }
@@ -219,6 +222,7 @@ extension BleCentral: CBCentralManagerDelegate {
 extension BleCentral: CBPeripheralDelegate {
     func peripheral(_ peripheral: CBPeripheral, didDiscoverServices error: Error?) {
         guard let services = peripheral.services else { return }
+        NSLog("[BleCentral] didDiscoverServices count=\(services.count)")
         for svc in services where svc.uuid == BleCentral.serviceUUID {
             peripheral.discoverCharacteristics(
                 [BleCentral.txCharUUID, BleCentral.rxCharUUID], for: svc)
@@ -236,6 +240,7 @@ extension BleCentral: CBPeripheralDelegate {
                 peripheral.setNotifyValue(true, for: c)
             }
         }
+        NSLog("[BleCentral] chars: tx=\(txChar != nil) rx=\(rxChar != nil)")
         if txChar != nil && rxChar != nil {
             let name = peripheral.name ?? peripheral.identifier.uuidString
             onStatus?("connected:\(name)")

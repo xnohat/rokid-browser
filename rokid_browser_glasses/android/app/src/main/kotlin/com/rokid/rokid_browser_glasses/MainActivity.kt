@@ -34,6 +34,11 @@ class MainActivity : FlutterActivity() {
     private val mainHandler = Handler(Looper.getMainLooper())
     private var passthroughView: android.view.View? = null
     private var cursorView: android.view.View? = null
+    private var cursorDotNormal: android.graphics.drawable.GradientDrawable? = null
+    private var cursorDotDrag: android.graphics.drawable.GradientDrawable? = null
+    private var cursorBroughtToFront = false
+    private var cursorWvOffsetY = -1f
+    private var cursorOffsetFrame = 0
 
     private val wifiReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
@@ -173,6 +178,7 @@ class MainActivity : FlutterActivity() {
         cursorView?.let { v ->
             try { (window.decorView as? android.view.ViewGroup)?.removeView(v) } catch (_: Exception) {}
             cursorView = null
+            cursorBroughtToFront = false
         }
         btClient?.stop()
         btClient = null
@@ -400,26 +406,47 @@ class MainActivity : FlutterActivity() {
                         cursorView = cv
                     }
                     val cv = cursorView!!
-                    // Find WebView's top offset in the window to account for status bar / system UI
-                    val wvOffsetY = run {
+                    // Cache the WebView offset; getLocationInWindow every frame is wasteful.
+                    if (cursorWvOffsetY < 0f || cursorOffsetFrame % 30 == 0) {
                         val wv = findWebView(root)
-                        if (wv != null) {
+                        cursorWvOffsetY = if (wv != null) {
                             val loc = IntArray(2)
                             wv.getLocationInWindow(loc)
                             loc[1].toFloat()
                         } else 0f
                     }
-                    val drawable = android.graphics.drawable.GradientDrawable().apply {
-                        shape = android.graphics.drawable.GradientDrawable.OVAL
-                        setColor(if (dragging) 0xFFFFA500.toInt() else 0xFFFFFFFF.toInt())
-                        setStroke((1.5f * density).toInt(), 0x8A000000.toInt())
+                    cursorOffsetFrame++
+                    val wvOffsetY = cursorWvOffsetY
+
+                    // Build the two drawables ONCE and reuse. Re-creating a GradientDrawable
+                    // and reassigning background every frame forces a full redraw.
+                    if (cursorDotNormal == null) {
+                        cursorDotNormal = android.graphics.drawable.GradientDrawable().apply {
+                            shape = android.graphics.drawable.GradientDrawable.OVAL
+                            setColor(0xFFFFFFFF.toInt())
+                            setStroke((1.5f * density).toInt(), 0x8A000000.toInt())
+                        }
+                        cursorDotDrag = android.graphics.drawable.GradientDrawable().apply {
+                            shape = android.graphics.drawable.GradientDrawable.OVAL
+                            setColor(0xFFFFA500.toInt())
+                            setStroke((1.5f * density).toInt(), 0x8A000000.toInt())
+                        }
                     }
-                    cv.background = drawable
+                    val wantBg = if (dragging) cursorDotDrag else cursorDotNormal
+                    if (cv.background !== wantBg) cv.background = wantBg
+
+                    // Only move via translation (cheap, no relayout of siblings).
                     cv.x = lx * density - sizePx / 2f
                     cv.y = wvOffsetY + ly * density - sizePx / 2f
-                    cv.visibility = if (visible) android.view.View.VISIBLE else android.view.View.INVISIBLE
-                    // Always draw cursor above passthrough overlay and SurfaceView video layer
-                    cv.bringToFront()
+                    val wantVis = if (visible) android.view.View.VISIBLE else android.view.View.INVISIBLE
+                    if (cv.visibility != wantVis) cv.visibility = wantVis
+                    // bringToFront() relayouts the whole ViewGroup and triggers a full repaint
+                    // (the WebView included) EVERY frame -> flashing + GPU heat. Do it only once
+                    // when the cursor first appears, not on every move.
+                    if (!cursorBroughtToFront) {
+                        cv.bringToFront()
+                        cursorBroughtToFront = true
+                    }
                     result.success(true)
                 }
                 else -> result.notImplemented()
