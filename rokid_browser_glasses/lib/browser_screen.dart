@@ -244,62 +244,27 @@ class _BrowserScreenState extends State<BrowserScreen> {
   /// (settings.textZoom, in %) which reflows content to the viewport width —
   /// unlike CSS `body.zoom` which scaled the box and left black gaps / overflow.
   void _applyZoom() {
-    // Zoom = reader-style TEXT zoom only. The viewport / layout width stays
-    // exactly as the page shipped it (width=device-width) — we NEVER touch the
-    // viewport meta here, so the frame keeps filling the screen; only the text
-    // (and text-sized elements) grow/shrink, like a browser's text-size control.
-    // Uniform whole-page zoom (text + images + boxes scale together) via CSS zoom
-    // on <html>. When zoomed out the page is smaller than the frame, so we CENTER
-    // it horizontally (margin auto on body) and paint the surrounding area black —
-    // no side border, page sits centered in the viewport.
-    _methodChannel.invokeMethod('setTextZoom', 100).catchError((_) {});
-    final z = _pageZoom;
-    final zStr = z.toStringAsFixed(3);
+    // Reader-style TEXT zoom via native WebView textZoom (%). This is the one
+    // approach that is STABLE on this WebView 95: text scales cleanly on every
+    // site, always fills the width, never shifts left/right, never breaks layout,
+    // never leaves a black margin. (Whole-page CSS zoom/transform that also scales
+    // images was tried many ways but was unreliable here — off-screen shifting,
+    // side margins, Facebook overriding it.)
+    final pct = (_pageZoom * 100).round().clamp(50, 200);
+    _methodChannel.invokeMethod('setTextZoom', pct).catchError((_) {});
+    // Remove any leftover experimental zoom styles/wrappers from earlier builds.
     _webController.runJavaScript('''
 (function(){
-  var mz=document.getElementById('__rokidMediaZoom'); if(mz)mz.remove();
-  var zf=document.getElementById('__rokidZoomFit'); if(zf)zf.remove();
-  var m=document.querySelector('meta[name="viewport"]');
-  if(m)m.setAttribute('content','width=device-width,initial-scale=1.0');
-  var de=document.documentElement, b=document.body;
-  var s=document.getElementById('__rokidZoomStyle');
-  if(!s){s=document.createElement('style');s.id='__rokidZoomStyle';(document.head||de).appendChild(s);}
-  if($z===1){
-    de.style.removeProperty('zoom');
-    s.textContent='';
-    // Unwrap: move children back out and remove the wrapper.
-    var wrap=document.getElementById('__rokidZoomWrap');
-    if(wrap){ while(wrap.firstChild){ document.body.insertBefore(wrap.firstChild, wrap); } wrap.remove(); }
-    return;
-  }
-  // Use CSS transform:scale (NOT `zoom`, which clamps layout width to the
-  // viewport on WebView 95 and left the right half black). We scale <body> by z
-  // about its top-left corner and widen it to (100/z)% so the scaled result
-  // exactly fills the viewport width. This is the reliable reflow-free page zoom.
+  var de=document.documentElement;
   de.style.removeProperty('zoom');
-  var invW=(100/$z).toFixed(3);
-  // Apply the scale to a WRAPPER we insert directly under <html>, moving ALL of
-  // <body>'s children into it. Facebook constantly rewrites <body>'s own
-  // transform/width, but it never touches our wrapper, so the zoom sticks.
+  de.style.removeProperty('width');
+  de.style.removeProperty('min-height');
+  if(document.body){document.body.style.removeProperty('width');document.body.style.removeProperty('transform');}
+  ['__rokidZoomStyle','__rokidMediaZoom','__rokidZoomFit'].forEach(function(id){
+    var e=document.getElementById(id); if(e)e.remove();
+  });
   var wrap=document.getElementById('__rokidZoomWrap');
-  if(!wrap){
-    wrap=document.createElement('div');
-    wrap.id='__rokidZoomWrap';
-    while(document.body.firstChild){ wrap.appendChild(document.body.firstChild); }
-    document.body.appendChild(wrap);
-  }
-  // transform-origin TOP-LEFT so the scaled box starts at x=0 and the compensating
-  // width (100/z)% makes the painted result exactly 100% of the viewport, anchored
-  // left — no shifting off to the right. (center origin + >100% width pushed the
-  // page rightward, which is what hid content on the right.)
-  wrap.style.cssText='transform:scale($zStr);transform-origin:top left;'+
-    'width:'+invW+'%;margin:0;position:relative;left:0;';
-  s.textContent=
-    'html,body{background:#000 !important;overflow-x:hidden !important;margin:0 !important;'+
-      'outline:none !important;border:0 !important;}'+
-    'body{display:block !important;}'+
-    '*{ -webkit-tap-highlight-color:transparent !important; }'+
-    '*:focus,*:focus-visible{outline:none !important;box-shadow:none !important;}';
+  if(wrap){ while(wrap.firstChild){ document.body.insertBefore(wrap.firstChild, wrap); } wrap.remove(); }
 })();''').catchError((_) {});
   }
 
