@@ -43,6 +43,7 @@ final class BleCentral: NSObject {
     // Keepalive
     private var pingTimer: Timer?
     private var scanRetryTimer: Timer?
+    private var scanningUnfiltered = false
     private let pingLine = "{\"type\":\"ping\"}\n"
 
     override init() {
@@ -131,42 +132,40 @@ final class BleCentral: NSObject {
         guard wantScan else { return }
         guard central.state == .poweredOn else { return }
         onStatus?("scanning")
-        NSLog("[BleCentral] beginScan for service")
+        NSLog("[BleCentral] beginScan (filtered)")
 
-        // 1) The glasses may already be connected at the iOS system level
-        //    (e.g. after the glasses app restarts) — grab it directly instead of
-        //    waiting for a fresh advertisement, which iOS may not surface.
+        // 1) Grab a peripheral already connected at the iOS system level
+        //    (e.g. after the glasses app restarts) — connect directly.
         let already = central.retrieveConnectedPeripherals(
             withServices: [BleCentral.serviceUUID])
         if let p = already.first {
             NSLog("[BleCentral] retrieveConnected -> \(p.name ?? "?")")
-            central.stopScan()
             self.peripheral = p
             p.delegate = self
             central.connect(p, options: nil)
-            scheduleScanRetry()
-            return
         }
 
-        // 2) Otherwise scan. AllowDuplicates lets us re-detect a peripheral that
-        //    re-advertised after a restart within the same scan session.
+        // 2) Start ONE continuous scan (do NOT stop/restart — that creates blind
+        //    windows). Begin service-filtered; Android legacy advertising sometimes
+        //    reports the 128-bit UUID inconsistently between the primary packet and
+        //    the scan response, so if we don't see it quickly we widen to an
+        //    unfiltered scan and match the UUID from the advertisement data
+        //    ourselves. AllowDuplicates so a re-advertising peripheral is re-seen.
         central.scanForPeripherals(
             withServices: [BleCentral.serviceUUID],
-            options: [CBCentralManagerScanOptionAllowDuplicatesKey: false])
-        scheduleScanRetry()
-    }
+            options: [CBCentralManagerScanOptionAllowDuplicatesKey: true])
+        scanningUnfiltered = false
 
-    /// If we are still not connected after a few seconds, restart the scan.
-    /// This is what makes reconnect reliable when the glasses app is relaunched
-    /// (the old advertisement is gone and iOS otherwise sits idle on the stale scan).
-    private func scheduleScanRetry() {
+        // Widen to unfiltered after a short grace period if still not connected.
         scanRetryTimer?.invalidate()
-        scanRetryTimer = Timer.scheduledTimer(withTimeInterval: 4.0, repeats: false) { [weak self] _ in
+        scanRetryTimer = Timer.scheduledTimer(withTimeInterval: 3.0, repeats: false) { [weak self] _ in
             guard let self = self else { return }
-            guard self.wantScan, self.txChar == nil else { return } // not connected yet
-            NSLog("[BleCentral] scan retry (still not connected)")
-            self.central.stopScan()
-            self.beginScan()
+            guard self.wantScan, self.txChar == nil, self.peripheral == nil else { return }
+            NSLog("[BleCentral] widening to UNFILTERED scan")
+            self.scanningUnfiltered = true
+            self.central.scanForPeripherals(
+                withServices: nil,
+                options: [CBCentralManagerScanOptionAllowDuplicatesKey: true])
         }
     }
 
@@ -219,8 +218,21 @@ extension BleCentral: CBCentralManagerDelegate {
                         didDiscover peripheral: CBPeripheral,
                         advertisementData: [String: Any],
                         rssi RSSI: NSNumber) {
-        NSLog("[BleCentral] didDiscover \(peripheral.name ?? "?") rssi=\(RSSI)")
+        // When scanning unfiltered we must verify the advertisement actually
+        // carries our service UUID (Android may put it only in the scan response).
+        if scanningUnfiltered {
+            let uuids = (advertisementData[CBAdvertisementDataServiceUUIDsKey] as? [CBUUID]) ?? []
+            let overflow = (advertisementData[CBAdvertisementDataOverflowServiceUUIDsKey] as? [CBUUID]) ?? []
+            let localName = (advertisementData[CBAdvertisementDataLocalNameKey] as? String) ?? ""
+            let matches = uuids.contains(BleCentral.serviceUUID)
+                || overflow.contains(BleCentral.serviceUUID)
+                || localName.hasPrefix("RokidBrowser")
+            if !matches { return }
+        }
+        guard self.peripheral == nil || self.peripheral?.identifier == peripheral.identifier else { return }
+        NSLog("[BleCentral] didDiscover \(peripheral.name ?? "?") rssi=\(RSSI) unfiltered=\(scanningUnfiltered)")
         central.stopScan()
+        scanRetryTimer?.invalidate(); scanRetryTimer = nil
         self.peripheral = peripheral
         peripheral.delegate = self
         central.connect(peripheral, options: nil)

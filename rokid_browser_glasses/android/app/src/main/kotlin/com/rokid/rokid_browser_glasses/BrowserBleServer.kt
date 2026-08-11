@@ -71,6 +71,14 @@ class BrowserBleServer(
             return
         }
 
+        // Give the adapter a recognisable name so the iOS central can match us by
+        // localName in the scan response even if the UUID filter misses.
+        try {
+            if (adapter.name?.startsWith("RokidBrowser") != true) {
+                adapter.name = "RokidBrowser"
+            }
+        } catch (_: Exception) {}
+
         advertiser = adapter.bluetoothLeAdvertiser
         if (advertiser == null) {
             Log.e(TAG, "Device does NOT support BLE advertising")
@@ -102,9 +110,11 @@ class BrowserBleServer(
 
         service.addCharacteristic(tx)
         service.addCharacteristic(rx)
+        // Advertising is started from onServiceAdded (below), NOT here — the GATT
+        // DB must be ready before we advertise, otherwise an iOS central that
+        // connects on the first advertisement can fail service discovery.
         gattServer?.addService(service)
 
-        startAdvertising()
         onStatus("listening")
     }
 
@@ -116,12 +126,19 @@ class BrowserBleServer(
             .setTimeout(0)
             .setTxPowerLevel(AdvertiseSettings.ADVERTISE_TX_POWER_HIGH)
             .build()
-        // Keep the packet small: advertise only the 128-bit service UUID.
+        // Primary packet: the 128-bit service UUID (a 128-bit UUID nearly fills the
+        // 31-byte payload, so the device name must NOT go here).
         val data = AdvertiseData.Builder()
             .setIncludeDeviceName(false)
             .addServiceUuid(ParcelUuid(SERVICE_UUID))
             .build()
-        advertiser?.startAdvertising(settings, data, advertiseCallback)
+        // Scan response: the device name only. Gives the iOS central a second,
+        // independent way to recognise us (localName) when a filtered scan misses
+        // the UUID in the primary packet.
+        val scanResponse = AdvertiseData.Builder()
+            .setIncludeDeviceName(true)
+            .build()
+        advertiser?.startAdvertising(settings, data, scanResponse, advertiseCallback)
     }
 
     @SuppressLint("MissingPermission")
@@ -181,6 +198,16 @@ class BrowserBleServer(
     }
 
     private val gattCallback = object : BluetoothGattServerCallback() {
+        @SuppressLint("MissingPermission")
+        override fun onServiceAdded(status: Int, service: BluetoothGattService) {
+            // GATT DB is ready — NOW it is safe to advertise.
+            if (status == BluetoothGatt.GATT_SUCCESS && running.get()) {
+                startAdvertising()
+            } else {
+                Log.e(TAG, "onServiceAdded failed status=$status")
+            }
+        }
+
         @SuppressLint("MissingPermission")
         override fun onConnectionStateChange(device: BluetoothDevice, status: Int, newState: Int) {
             if (newState == BluetoothGatt.STATE_CONNECTED) {
