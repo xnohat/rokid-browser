@@ -49,7 +49,11 @@ class _BrowserScreenState extends State<BrowserScreen> {
   Timer? _configRetryTimer;
   bool _passthrough = false;
   bool _theaterMode = false;
-  bool _videoFullscreen = false; // true while a page video is in HTML5 fullscreen
+  // Address bar hidden state has two independent sources (advisor): the user's
+  // manual toggle and real HTML5-video fullscreen. Effective = either is true.
+  bool _manualHudHidden = false;
+  bool _autoVideoFullscreen = false;
+  bool get _videoFullscreen => _manualHudHidden || _autoVideoFullscreen;
   int _lastGestureMs = 0; // debounce for touchpad swipes
   static const _gestureDebounceMs = 700;
 
@@ -91,10 +95,14 @@ class _BrowserScreenState extends State<BrowserScreen> {
         // The page reports a video going (near-)fullscreen; hide the HUD AND drop
         // the in-page HUD inset so the video reaches the very top edge.
         final fs = msg.message == '1';
-        if (mounted && fs != _videoFullscreen) {
-          setState(() => _videoFullscreen = fs);
-          // 0 inset while fullscreen, restore _kHudHeight on exit.
-          _applyHudInset(fullscreen: fs);
+        if (mounted && fs != _autoVideoFullscreen) {
+          final before = _videoFullscreen;
+          setState(() => _autoVideoFullscreen = fs);
+          // Only touch the inset when the EFFECTIVE hidden state actually changed
+          // (so a delayed auto '0' can't restore the inset while manually hidden).
+          if (_videoFullscreen != before) {
+            _applyHudInset(fullscreen: _videoFullscreen);
+          }
         }
       })
       ..setBackgroundColor(_kBlack)
@@ -116,7 +124,7 @@ class _BrowserScreenState extends State<BrowserScreen> {
             _url = url;
             _loading = true;
             _theaterMode = false;
-            _videoFullscreen = false;
+            _autoVideoFullscreen = false; // reset auto; keep the manual choice
           });
           // Paint the page dark IMMEDIATELY (before content renders) so a bright
           // white background never flashes onto the waveguide — the white flash is
@@ -164,20 +172,10 @@ class _BrowserScreenState extends State<BrowserScreen> {
   if(!window.__rokidFSHooked){
     window.__rokidFSHooked=true;
     function _bigVideo(){
-      if(document.fullscreenElement) return true;
-      var vs=document.querySelectorAll('video'), vw=window.innerWidth, vh=window.innerHeight;
-      for(var i=0;i<vs.length;i++){
-        var v=vs[i]; if(v.paused||v.readyState<2) continue;
-        var r=v.getBoundingClientRect();
-        // A big PLAYING video (covers most of the height OR width) => treat as
-        // fullscreen and hide the bar. Lower height threshold so vertical Reels
-        // (tall, narrower) also qualify.
-        var coversH = r.height>=vh*0.62;
-        var coversW = r.width>=vw*0.85;
-        var onScreen = r.top<vh*0.5 && r.bottom>vh*0.3;
-        if(onScreen && (coversH || coversW)) return true;
-      }
-      return false;
+      // Auto-hide ONLY for real HTML5 fullscreen (reliable, no false positives on
+      // large feed/autoplay videos). Reels / CSS-enlarged players are handled by
+      // the manual "Ẩn thanh URL" button. (advisor: size heuristic was too eager.)
+      return !!document.fullscreenElement;
     }
     var _last=-1;
     function _rfs(){ var f=_bigVideo()?1:0; if(f!==_last){_last=f; try{RokidFS.postMessage(''+f);}catch(e){}} }
@@ -632,12 +630,13 @@ class _BrowserScreenState extends State<BrowserScreen> {
         if (mounted) setState(() => _isDark = dark);
         if (_url.isNotEmpty) await _applyTheme(dark);
       case 'toggle_hud':
-        // Manual show/hide of the address bar (for videos where auto-detect
-        // doesn't fire). Reuses _videoFullscreen: true = bar hidden.
+        // Manual show/hide of the address bar (independent of auto video-detect).
         if (mounted) {
-          final hide = !_videoFullscreen;
-          setState(() => _videoFullscreen = hide);
-          await _applyHudInset(fullscreen: hide);
+          final before = _videoFullscreen;
+          setState(() => _manualHudHidden = !_manualHudHidden);
+          if (_videoFullscreen != before) {
+            await _applyHudInset(fullscreen: _videoFullscreen);
+          }
         }
       case 'minimize':
         if (_theaterMode) {
