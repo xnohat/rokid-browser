@@ -130,15 +130,15 @@ class _BrowserScreenState extends State<BrowserScreen> {
           await _applyTheme(_isDark);
 
           // Reset viewport and apply persistent zoom for the AR display
-          final zoom = _pageZoom.toStringAsFixed(2);
           await _webController.runJavaScript('''
 (function(){
   var m=document.querySelector('meta[name="viewport"]');
   if(!m){m=document.createElement('meta');m.name='viewport';document.head.appendChild(m);}
   m.content='width=device-width,initial-scale=1.0,maximum-scale=5.0,minimum-scale=0.1';
-  if(document.body)document.body.style.zoom='$zoom';
   document.querySelectorAll('video').forEach(function(v){v.muted=false;if(v.volume>0.5)v.volume=0.5;});
 })();''');
+          // Re-apply the current zoom via native text zoom (survives navigation).
+          _applyZoom();
           // Reserve the HUD strip INSIDE the page (the WebView itself is full-screen
           // and sits UNDER the address bar). A persistent scroll-padding + a spacer
           // push the page content below the address bar so it is never overlapped,
@@ -237,6 +237,14 @@ class _BrowserScreenState extends State<BrowserScreen> {
   /// Push the page content below the top HUD/address strip by injecting a fixed
   /// spacer + top padding, so a full-screen WebView never has the address bar
   /// overlapping its content. Idempotent (safe to call on every page load).
+  /// Zoom the page like a real browser: use the WebView's native text zoom
+  /// (settings.textZoom, in %) which reflows content to the viewport width —
+  /// unlike CSS `body.zoom` which scaled the box and left black gaps / overflow.
+  void _applyZoom() {
+    final pct = (_pageZoom * 100).round();
+    _methodChannel.invokeMethod('setTextZoom', pct).catchError((_) {});
+  }
+
   /// Robust scroll: many sites (incl. m.facebook.com) put the scrollable content
   /// in an inner element with its own overflow, not the window. Scroll the window
   /// AND walk up from the cursor position to the nearest actually-scrollable
@@ -493,19 +501,11 @@ class _BrowserScreenState extends State<BrowserScreen> {
       case 'scroll_right':
         _scrollPage(80, 0);
       case 'zoom_in':
-        _pageZoom = (_pageZoom + 0.1).clamp(0.3, 3.0);
-        _webController.runJavaScript(
-          "document.documentElement.style.background='#000';"
-          "document.body.style.background='#000';"
-          "document.body.style.zoom='${_pageZoom.toStringAsFixed(2)}';",
-        );
+        _pageZoom = (_pageZoom + 0.1).clamp(0.5, 3.0);
+        _applyZoom();
       case 'zoom_out':
-        _pageZoom = (_pageZoom - 0.1).clamp(0.3, 3.0);
-        _webController.runJavaScript(
-          "document.documentElement.style.background='#000';"
-          "document.body.style.background='#000';"
-          "document.body.style.zoom='${_pageZoom.toStringAsFixed(2)}';",
-        );
+        _pageZoom = (_pageZoom - 0.1).clamp(0.5, 3.0);
+        _applyZoom();
       case 'set_theme':
         final dark = cmd['dark'] as bool? ?? true;
         if (mounted) setState(() => _isDark = dark);

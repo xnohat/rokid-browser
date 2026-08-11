@@ -307,6 +307,16 @@ class MainActivity : FlutterActivity() {
                     setScreenDim(userDimLevel)
                     result.success(true)
                 }
+                "setTextZoom" -> {
+                    // Browser-style zoom: WebView native text zoom (%) reflows the
+                    // page to the viewport width instead of scaling the box.
+                    val pct = (call.arguments as? Number)?.toInt() ?: 100
+                    val wv = findWebView(window.decorView)
+                    if (wv != null) {
+                        wv.settings.textZoom = pct.coerceIn(50, 300)
+                    }
+                    result.success(wv != null)
+                }
                 "setThirdPartyCookies" -> {
                     val args = call.arguments as? Map<*, *>
                     val block = args?.get("block") as? Boolean ?: false
