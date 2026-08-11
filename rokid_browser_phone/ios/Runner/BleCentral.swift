@@ -73,24 +73,33 @@ final class BleCentral: NSObject {
         pumpTx()
     }
 
-    /// Flow-controlled write: one chunk outstanding at a time.
-    /// Uses .withResponse so the next chunk is only sent from didWriteValueFor,
-    /// which matches the Android TX characteristic's WRITE property and prevents
-    /// silent loss/reordering on multi-chunk payloads (typing, wifi passwords).
+    /// Flow-controlled write. High-frequency commands (trackpad cursor_move) make
+    /// per-chunk acknowledgement (.withResponse) far too slow — the queue backs up
+    /// and the glasses cursor lags/stutters. We therefore prefer
+    /// .withoutResponse and pace by CoreBluetooth's canSendWriteWithoutResponse
+    /// back-pressure signal (peripheralIsReadyToSendWriteWithoutResponse), which is
+    /// both fast and lossless at the link layer. Falls back to .withResponse only
+    /// if the peripheral does not expose write-without-response.
     private func pumpTx() {
         guard let p = peripheral, let tx = txChar else { return }
+        let canNoResp = tx.properties.contains(.writeWithoutResponse)
+        if canNoResp {
+            while !txQueue.isEmpty {
+                if !p.canSendWriteWithoutResponse {
+                    // Wait for peripheralIsReadyToSendWriteWithoutResponse.
+                    return
+                }
+                let chunk = txQueue.removeFirst()
+                p.writeValue(chunk, for: tx, type: .withoutResponse)
+            }
+            return
+        }
+        // Reliable path (typing/wifi on peripherals lacking no-response writes).
         if txInFlight { return }
         guard !txQueue.isEmpty else { return }
-        let useResponse = tx.properties.contains(.write)
+        txInFlight = true
         let chunk = txQueue.removeFirst()
-        if useResponse {
-            txInFlight = true
-            p.writeValue(chunk, for: tx, type: .withResponse)
-        } else {
-            // Peripheral only supports write-without-response.
-            p.writeValue(chunk, for: tx, type: .withoutResponse)
-            pumpTx()
-        }
+        p.writeValue(chunk, for: tx, type: .withResponse)
     }
 
     func reset() {
@@ -247,6 +256,11 @@ extension BleCentral: CBPeripheralDelegate {
                     error: Error?) {
         guard characteristic.uuid == BleCentral.txCharUUID else { return }
         txInFlight = false
-        pumpTx() // send the next queued chunk
+        pumpTx() // send the next queued chunk (reliable path)
+    }
+
+    /// BLE link is ready for more write-without-response traffic — drain the queue.
+    func peripheralIsReady(toSendWriteWithoutResponse peripheral: CBPeripheral) {
+        pumpTx()
     }
 }
