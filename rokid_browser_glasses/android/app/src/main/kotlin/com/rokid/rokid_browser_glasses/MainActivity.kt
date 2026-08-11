@@ -35,6 +35,7 @@ class MainActivity : FlutterActivity() {
     private var passthroughView: android.view.View? = null
     private var cursorView: android.view.View? = null
     private var userDimLevel = 0.55f // last brightness-dim chosen from the phone
+    private var currentZoomFactor = 1f // current WebView pinch-zoom scale
     private var cursorDotNormal: android.graphics.drawable.GradientDrawable? = null
     private var cursorDotDrag: android.graphics.drawable.GradientDrawable? = null
     private var cursorBroughtToFront = false
@@ -307,13 +308,30 @@ class MainActivity : FlutterActivity() {
                     setScreenDim(userDimLevel)
                     result.success(true)
                 }
+                "resetZoom" -> {
+                    // A newly loaded page starts at 100%; keep our tracker in sync.
+                    currentZoomFactor = 1f
+                    result.success(true)
+                }
                 "setTextZoom" -> {
-                    // Browser-style zoom: WebView native text zoom (%) reflows the
-                    // page to the viewport width instead of scaling the box.
+                    // Browser-style zoom via native pinch-zoom (zoomBy): scales the
+                    // WHOLE page like Ctrl +/- / pinch, so fixed-width sites like
+                    // Facebook scale uniformly instead of only enlarging text and
+                    // overflowing their containers. We convert the desired absolute
+                    // zoom % into a relative factor from the current scale.
                     val pct = (call.arguments as? Number)?.toInt() ?: 100
+                    val target = (pct.coerceIn(50, 300)) / 100f
                     val wv = findWebView(window.decorView)
                     if (wv != null) {
-                        wv.settings.textZoom = pct.coerceIn(50, 300)
+                        // Enable pinch/zoom support (built-in controls hidden).
+                        wv.settings.builtInZoomControls = true
+                        wv.settings.displayZoomControls = false
+                        wv.settings.setSupportZoom(true)
+                        wv.settings.useWideViewPort = true
+                        val cur = if (currentZoomFactor <= 0f) 1f else currentZoomFactor
+                        val factor = target / cur
+                        currentZoomFactor = target
+                        wv.zoomBy(factor.coerceIn(0.2f, 5f))
                     }
                     result.success(wv != null)
                 }

@@ -137,8 +137,9 @@ class _BrowserScreenState extends State<BrowserScreen> {
   m.content='width=device-width,initial-scale=1.0,maximum-scale=5.0,minimum-scale=0.1';
   document.querySelectorAll('video').forEach(function(v){v.muted=false;if(v.volume>0.5)v.volume=0.5;});
 })();''');
-          // Re-apply the current zoom via native text zoom (survives navigation).
-          _applyZoom();
+          // New page loads at 100% (WebView resets pinch scale on navigation).
+          _pageZoom = 1.0;
+          _methodChannel.invokeMethod('resetZoom').catchError((_) {});
           // Reserve the HUD strip INSIDE the page (the WebView itself is full-screen
           // and sits UNDER the address bar). A persistent scroll-padding + a spacer
           // push the page content below the address bar so it is never overlapped,
