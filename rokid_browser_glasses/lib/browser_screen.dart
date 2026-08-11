@@ -238,22 +238,40 @@ class _BrowserScreenState extends State<BrowserScreen> {
     // exactly as the page shipped it (width=device-width) — we NEVER touch the
     // viewport meta here, so the frame keeps filling the screen; only the text
     // (and text-sized elements) grow/shrink, like a browser's text-size control.
-    // Desktop-browser style zoom (Ctrl +/-): scale the WHOLE document uniformly
-    // with CSS zoom on <html>. Everything — text, images, buttons, boxes, padding
-    // — shrinks/grows together. Zooming out shows the page smaller centered in the
-    // frame (a little margin, exactly like a desktop browser at <100%); zooming in
-    // enlarges everything. Reset textZoom to 100 so it doesn't double-scale text.
+    // Uniform whole-page zoom (text + images + boxes scale together) via CSS zoom
+    // on <html>. When zoomed out the page is smaller than the frame, so we CENTER
+    // it horizontally (margin auto on body) and paint the surrounding area black —
+    // no side border, page sits centered in the viewport.
     _methodChannel.invokeMethod('setTextZoom', 100).catchError((_) {});
     final z = _pageZoom;
+    final zStr = z.toStringAsFixed(3);
     _webController.runJavaScript('''
 (function(){
-  var s=document.getElementById('__rokidZoomFit'); if(s)s.remove();
   var mz=document.getElementById('__rokidMediaZoom'); if(mz)mz.remove();
+  var zf=document.getElementById('__rokidZoomFit'); if(zf)zf.remove();
   var m=document.querySelector('meta[name="viewport"]');
   if(m)m.setAttribute('content','width=device-width,initial-scale=1.0');
-  // Uniform page zoom. `zoom` scales the whole rendering box including layout.
-  document.documentElement.style.setProperty('zoom','$z','important');
-  document.documentElement.style.setProperty('background','#000','important');
+  var de=document.documentElement, b=document.body;
+  var s=document.getElementById('__rokidZoomStyle');
+  if(!s){s=document.createElement('style');s.id='__rokidZoomStyle';(document.head||de).appendChild(s);}
+  if($z===1){
+    de.style.removeProperty('zoom');
+    s.textContent='';
+    return;
+  }
+  de.style.setProperty('zoom','$zStr','important');
+  // Expand the layout width to (viewport / z) PIXELS so that, after the browser
+  // multiplies by the zoom factor z, the painted width == the physical viewport
+  // width (no right-hand gap). Using explicit px is more reliable than % because
+  // some engines resolve % against the pre-zoom containing block.
+  var vw=window.innerWidth||document.documentElement.clientWidth||360;
+  var wpx=Math.round(vw/$z);
+  s.textContent=
+    'html{background:#000 !important;width:'+wpx+'px !important;min-width:'+wpx+'px !important;}'+
+    'body{width:'+wpx+'px !important;max-width:none !important;min-width:0 !important;'+
+      'margin:0 !important;}'+
+    ':focus{outline:none !important;}'+
+    'html,body{border:0 !important;}';
 })();''').catchError((_) {});
   }
 
