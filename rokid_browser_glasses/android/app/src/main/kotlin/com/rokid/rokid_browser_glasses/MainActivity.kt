@@ -105,12 +105,13 @@ class MainActivity : FlutterActivity() {
                 (window.decorView as? android.view.ViewGroup)?.removeView(it)
                 dimScrimView = null
             }
-            val a = alpha.coerceIn(0f, 0.8f)
+            val a = alpha.coerceIn(0f, 1f)
             window.attributes = window.attributes.apply {
                 screenBrightness = if (a <= 0f)
                     WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE
                 else
-                    (1f - a).coerceIn(0.15f, 1f)
+                    // Keep a 4% floor so the panel never goes fully black/unusable.
+                    (1f - a).coerceIn(0.04f, 1f)
             }
         }
     }

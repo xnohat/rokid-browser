@@ -1588,8 +1588,8 @@ class _DimControls extends StatelessWidget {
               child: Slider(
                 value: value,
                 min: 0.0,
-                max: 0.8,
-                divisions: 16,
+                max: 1.0,
+                divisions: 20,
                 label: 'Dim $pct%',
                 onChanged: enabled ? onChanged : null,
               ),
