@@ -148,7 +148,17 @@ class _BrowserScreenState extends State<BrowserScreen> {
           await _applyTheme(_isDark);
           // Deterministic CSS dark pass (covers sites native force-dark misses,
           // e.g. m.facebook.com) — no invert filter, so low GPU cost.
-          if (_isDark) await _applyHardDark();
+          if (_isDark) {
+            await _applyHardDark();
+            // Facebook & other SPA feeds render cards lazily after load; re-run the
+            // pass a couple of times (NOT a continuous interval → stays cool).
+            Future.delayed(const Duration(milliseconds: 900), () {
+              if (mounted && _isDark) _applyHardDark();
+            });
+            Future.delayed(const Duration(milliseconds: 2500), () {
+              if (mounted && _isDark) _applyHardDark();
+            });
+          }
 
           final title = await _webController.getTitle() ?? '';
           final canGoBack = await _webController.canGoBack();
@@ -310,34 +320,41 @@ class _BrowserScreenState extends State<BrowserScreen> {
     if(cs)cs.content='dark';
     document.documentElement.style.colorScheme='dark';
   }catch(e){}
-  // 2) Base dark style.
+  // 2) Base dark style + broad override: any element whose background is a light
+  //    color becomes dark. We keep this as a stylesheet using a wide net.
   var s=document.getElementById('__rokidDark');
   if(!s){s=document.createElement('style');s.id='__rokidDark';
     (document.head||document.documentElement).appendChild(s);}
   s.textContent=
-    'html,body{background:#000 !important;color:#cfcfcf !important;}'+
-    'a{color:#8ab4f8 !important;}';
-  // 3) One-shot recolor of near-white opaque backgrounds + near-black text.
-  function near(c,hi){ // c='rgb(r,g,b...)' ; hi=true->near white, false->near black
-    var m=/rgb\((\d+),\s*(\d+),\s*(\d+)/i.exec(c)||
-          /rgba\((\d+),\s*(\d+),\s*(\d+),\s*([\d.]+)/i.exec(c);
-    if(!m)return false;
-    var r=+m[1],g=+m[2],b=+m[3],a=m[4]===undefined?1:+m[4];
-    if(a<0.5)return false;
-    var L=(r+g+b)/3;
-    return hi?L>210:L<40;
+    'html,body{background:#000 !important;color:#d0d0d0 !important;}'+
+    'a{color:#8ab4f8 !important;}'+
+    // Force common white surfaces dark. div/section/article/etc. that sites use
+    // for cards. Media and form controls are excluded further down.
+    ':is(div,section,article,main,aside,header,footer,nav,ul,li,form,span,td,tr,table)'+
+      '{background-color:transparent !important;}';
+  // 3) Computed-style pass: recolor ANY light opaque background to dark and dark
+  //    text to light. Lower threshold (160) catches light-gray cards too.
+  function lum(c){
+    var m=/rgba?\((\d+),\s*(\d+),\s*(\d+)(?:,\s*([\d.]+))?/i.exec(c);
+    if(!m)return null;
+    return {r:+m[1],g:+m[2],b:+m[3],a:m[4]===undefined?1:+m[4],L:(+m[1]+ +m[2]+ +m[3])/3};
   }
-  var SKIP={IMG:1,VIDEO:1,CANVAS:1,SVG:1,PICTURE:1,IFRAME:1,INPUT:1,TEXTAREA:1,SELECT:1};
+  var SKIP={IMG:1,VIDEO:1,CANVAS:1,SVG:1,PICTURE:1,IFRAME:1,INPUT:1,TEXTAREA:1,SELECT:1,BUTTON:1};
   function fix(el){
     if(!el||el.nodeType!==1||SKIP[el.tagName])return;
     var cs=getComputedStyle(el);
-    if(cs.backgroundImage&&cs.backgroundImage!=='none'){/*leave images*/}
-    else if(near(cs.backgroundColor,true))el.style.setProperty('background-color','#111','important');
-    if(near(cs.color,false))el.style.setProperty('color','#d0d0d0','important');
+    var bi=cs.backgroundImage;
+    var hasImg=bi&&bi!=='none'&&bi.indexOf('url(')>=0;
+    if(!hasImg){
+      var bg=lum(cs.backgroundColor);
+      if(bg&&bg.a>=0.3&&bg.L>150)el.style.setProperty('background-color','#0f0f0f','important');
+    }
+    var fg=lum(cs.color);
+    if(fg&&fg.a>=0.3&&fg.L<90)el.style.setProperty('color','#d5d5d5','important');
   }
   function pass(root){
     var all=root.querySelectorAll('*');
-    for(var i=0;i<all.length && i<4000;i++)fix(all[i]);
+    for(var i=0;i<all.length && i<8000;i++)fix(all[i]);
   }
   pass(document);
   // Lightweight observer for SPA / late nodes (batched, no polling interval).
