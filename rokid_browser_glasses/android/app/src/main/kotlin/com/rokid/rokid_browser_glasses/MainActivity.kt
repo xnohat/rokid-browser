@@ -94,40 +94,23 @@ class MainActivity : FlutterActivity() {
     /// the display emits, plus a lowered screen brightness. This is the reliable
     /// anti-overheat layer for any page (Facebook feed, iframes, canvas) that CSS
     /// dark mode can't fully darken. alpha 0 = off.
+    /// On the Rokid waveguide a translucent black View does NOT reduce emitted
+    /// light (it only muddies the content). The one thing that genuinely cuts light
+    /// and heat is lowering the actual panel brightness. So this only sets
+    /// screenBrightness — no overlay View. alpha here is reused as a "dim amount".
     private fun setDimScrim(alpha: Float) {
         runOnUiThread {
-            val root = window.decorView as android.view.ViewGroup
+            // Remove any legacy overlay from earlier builds.
+            dimScrimView?.let {
+                (window.decorView as? android.view.ViewGroup)?.removeView(it)
+                dimScrimView = null
+            }
             val a = alpha.coerceIn(0f, 0.8f)
-            if (a <= 0f) {
-                dimScrimView?.let { root.removeView(it); dimScrimView = null }
-                // Restore automatic brightness.
-                window.attributes = window.attributes.apply {
-                    screenBrightness = WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE
-                }
-                return@runOnUiThread
-            }
-            if (dimScrimView == null) {
-                val v = android.view.View(this)
-                v.setBackgroundColor(0xFF000000.toInt())
-                v.isClickable = false
-                v.isFocusable = false
-                // Let touches pass through to the WebView/cursor below.
-                v.setOnTouchListener { _, _ -> false }
-                root.addView(
-                    v,
-                    android.widget.FrameLayout.LayoutParams(
-                        android.widget.FrameLayout.LayoutParams.MATCH_PARENT,
-                        android.widget.FrameLayout.LayoutParams.MATCH_PARENT
-                    )
-                )
-                dimScrimView = v
-            }
-            dimScrimView?.alpha = a
-            // Keep the cursor above the scrim.
-            cursorView?.bringToFront()
-            // Also lower panel brightness to cut emitted light further.
             window.attributes = window.attributes.apply {
-                screenBrightness = (1f - a * 0.6f).coerceIn(0.25f, 1f)
+                screenBrightness = if (a <= 0f)
+                    WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE
+                else
+                    (1f - a).coerceIn(0.15f, 1f)
             }
         }
     }
@@ -316,11 +299,10 @@ class MainActivity : FlutterActivity() {
                     val enable = call.arguments as? Boolean ?: true
                     val wv = findWebView(window.decorView)
                     if (wv != null) applyForceDark(wv, enable)
-                    // Guarantee reduced emitted light regardless of the page: a
-                    // black scrim over the WebView + lowered screen brightness. This
-                    // is the reliable anti-overheat layer for pages CSS can't darken
-                    // (Facebook feed, iframes, canvas).
-                    setDimScrim(if (enable) 0.45f else 0f)
+                    // Lower actual panel brightness when dark mode is on — the only
+                    // thing that genuinely cuts emitted light/heat on the waveguide
+                    // for pages CSS can't darken (Facebook feed, iframes, canvas).
+                    setDimScrim(if (enable) 0.3f else 0f)
                     result.success(wv != null)
                 }
                 "setDim" -> {
