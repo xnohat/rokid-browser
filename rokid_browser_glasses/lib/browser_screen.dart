@@ -373,11 +373,15 @@ class _BrowserScreenState extends State<BrowserScreen> {
         final dy = (cmd['dy'] as num?)?.toDouble() ?? 0;
         if (mounted) {
           final size = MediaQuery.of(context).size;
-          setState(() {
-            _cursorX = (_cursorX + dx * 2.5).clamp(0, size.width);
-            _cursorY = (_cursorY + dy * 2.5).clamp(0, size.height);
-            _cursorVisible = true;
-          });
+          // IMPORTANT: do NOT call setState() here. The cursor is drawn by a native
+          // Android overlay View (see updateCursor in MainActivity.kt), NOT by the
+          // Flutter tree — so rebuilding the widget tree (which includes the
+          // VirtualDisplay WebView) ~20x/sec on every trackpad move is what caused
+          // the flashing + overheating. Just update the coordinates and push them
+          // straight to the native cursor.
+          _cursorX = (_cursorX + dx * 2.5).clamp(0, size.width);
+          _cursorY = (_cursorY + dy * 2.5).clamp(0, size.height);
+          _cursorVisible = true;
           _resetCursorHideTimer();
           _syncCursor();
         }
@@ -472,11 +476,11 @@ class _BrowserScreenState extends State<BrowserScreen> {
         final ddy = (cmd['dy'] as num?)?.toDouble() ?? 0;
         if (mounted) {
           final size = MediaQuery.of(context).size;
-          setState(() {
-            _cursorX = (_cursorX + ddx * 2.5).clamp(0, size.width);
-            _cursorY = (_cursorY + ddy * 2.5).clamp(0, size.height);
-            _cursorVisible = true;
-          });
+          // No setState() — same reason as cursor_move: the native overlay draws
+          // the cursor; rebuilding the WebView subtree per drag frame overheats.
+          _cursorX = (_cursorX + ddx * 2.5).clamp(0, size.width);
+          _cursorY = (_cursorY + ddy * 2.5).clamp(0, size.height);
+          _cursorVisible = true;
           _resetCursorHideTimer();
           _syncCursor();
           // Scroll the page like a phone swipe (negate delta: drag up = scroll down)
