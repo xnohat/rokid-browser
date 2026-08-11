@@ -136,6 +136,14 @@ class _BrowserScreenState extends State<BrowserScreen> {
   if(!m){m=document.createElement('meta');m.name='viewport';document.head.appendChild(m);}
   m.content='width=device-width,initial-scale=1.0,maximum-scale=5.0,minimum-scale=0.1';
   document.querySelectorAll('video').forEach(function(v){v.muted=false;if(v.volume>0.5)v.volume=0.5;});
+  // Kill the green tap-highlight / focus outline that appears as a border around
+  // focused links & the page frame on this WebView.
+  var g=document.getElementById('__rokidNoOutline');
+  if(!g){g=document.createElement('style');g.id='__rokidNoOutline';(document.head||document.documentElement).appendChild(g);}
+  g.textContent='*{ -webkit-tap-highlight-color:transparent !important; }'+
+    '*:focus,*:focus-visible,a:focus,button:focus,input:focus{outline:none !important;'+
+      'box-shadow:none !important;}'+
+    'html,body{outline:none !important;border:0 !important;}';
 })();''');
           // Reset the cached base viewport (new page = fresh layout) then re-apply
           // the user's zoom level. If never zoomed, this is a no-op at 100%.
@@ -280,11 +288,18 @@ class _BrowserScreenState extends State<BrowserScreen> {
     while(document.body.firstChild){ wrap.appendChild(document.body.firstChild); }
     document.body.appendChild(wrap);
   }
+  // transform-origin TOP-LEFT so the scaled box starts at x=0 and the compensating
+  // width (100/z)% makes the painted result exactly 100% of the viewport, anchored
+  // left — no shifting off to the right. (center origin + >100% width pushed the
+  // page rightward, which is what hid content on the right.)
   wrap.style.cssText='transform:scale($zStr);transform-origin:top left;'+
-    'width:'+invW+'%;';
+    'width:'+invW+'%;margin:0;position:relative;left:0;';
   s.textContent=
-    'html,body{background:#000 !important;overflow-x:hidden !important;margin:0 !important;}'+
-    ':focus{outline:none !important;}';
+    'html,body{background:#000 !important;overflow-x:hidden !important;margin:0 !important;'+
+      'outline:none !important;border:0 !important;}'+
+    'body{display:block !important;}'+
+    '*{ -webkit-tap-highlight-color:transparent !important; }'+
+    '*:focus,*:focus-visible{outline:none !important;box-shadow:none !important;}';
 })();''').catchError((_) {});
   }
 

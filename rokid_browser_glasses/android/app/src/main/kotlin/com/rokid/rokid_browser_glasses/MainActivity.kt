@@ -289,6 +289,33 @@ class MainActivity : FlutterActivity() {
                         wv.settings.useWideViewPort = true
                         wv.settings.loadWithOverviewMode = true
                         applyForceDark(wv, true)
+                        // Remove the green edge-glow (overscroll) + scrollbars that
+                        // draw a rectangle outline around the WebView using the theme
+                        // accent color.
+                        wv.overScrollMode = android.view.View.OVER_SCROLL_NEVER
+                        wv.isVerticalScrollBarEnabled = false
+                        wv.isHorizontalScrollBarEnabled = false
+                        wv.scrollBarStyle = android.view.View.SCROLLBARS_INSIDE_OVERLAY
+                        wv.setBackgroundColor(0xFF000000.toInt())
+                        // Kill the default focus highlight rectangle (drawn with the
+                        // theme accent = the green frame around the WebView).
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                            wv.defaultFocusHighlightEnabled = false
+                        }
+                        wv.foreground = null
+                        // Walk up parents and clear any foreground/focus highlight too.
+                        var p = wv.parent
+                        var hops = 0
+                        while (p is android.view.View && hops < 6) {
+                            try {
+                                (p as android.view.View).foreground = null
+                                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                                    (p as android.view.View).defaultFocusHighlightEnabled = false
+                                }
+                            } catch (_: Exception) {}
+                            p = (p as android.view.View).parent
+                            hops++
+                        }
                     }
                     result.success(wv != null)
                 }
