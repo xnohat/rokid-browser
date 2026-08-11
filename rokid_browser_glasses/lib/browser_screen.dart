@@ -137,8 +137,10 @@ class _BrowserScreenState extends State<BrowserScreen> {
   m.content='width=device-width,initial-scale=1.0,maximum-scale=5.0,minimum-scale=0.1';
   document.querySelectorAll('video').forEach(function(v){v.muted=false;if(v.volume>0.5)v.volume=0.5;});
 })();''');
-          // Re-apply the user's zoom level to the new page (reflow-zoom via the
-          // viewport width). If never zoomed, this is a no-op at 100%.
+          // Reset the cached base viewport (new page = fresh layout) then re-apply
+          // the user's zoom level. If never zoomed, this is a no-op at 100%.
+          await _webController.runJavaScript(
+              'window.__rokidBaseVW=0;').catchError((_) {});
           if (_pageZoom != 1.0) _applyZoom();
           // Reserve the HUD strip INSIDE the page (the WebView itself is full-screen
           // and sits UNDER the address bar). A persistent scroll-padding + a spacer
@@ -259,13 +261,18 @@ class _BrowserScreenState extends State<BrowserScreen> {
     s.textContent='';
     return;
   }
+  // Capture the TRUE (zoom=1) CSS viewport width ONCE and reuse it, so repeated
+  // zoom steps don't compound a shrinking innerWidth into a wrong layout width.
+  if(!window.__rokidBaseVW){
+    // innerWidth is affected by the current zoom, so undo it to get the base.
+    var curZoom=parseFloat(de.style.zoom)||1;
+    window.__rokidBaseVW=Math.round((window.innerWidth||de.clientWidth||360)*curZoom);
+  }
   de.style.setProperty('zoom','$zStr','important');
-  // Expand the layout width to (viewport / z) PIXELS so that, after the browser
-  // multiplies by the zoom factor z, the painted width == the physical viewport
-  // width (no right-hand gap). Using explicit px is more reliable than % because
-  // some engines resolve % against the pre-zoom containing block.
-  var vw=window.innerWidth||document.documentElement.clientWidth||360;
-  var wpx=Math.round(vw/$z);
+  // Expand the layout width to (baseViewport / z) PIXELS so that, after the
+  // browser multiplies by the zoom factor z, the painted width == the physical
+  // viewport width (no right-hand gap).
+  var wpx=Math.round(window.__rokidBaseVW/$z);
   s.textContent=
     'html{background:#000 !important;width:'+wpx+'px !important;min-width:'+wpx+'px !important;}'+
     'body{width:'+wpx+'px !important;max-width:none !important;min-width:0 !important;'+
