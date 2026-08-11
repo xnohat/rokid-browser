@@ -816,41 +816,26 @@ class _BrowserScreenState extends State<BrowserScreen> {
         },
         child: Scaffold(
           backgroundColor: _kBlack,
-          body: Stack(
+          body: Column(
             children: [
-              // Content sits BELOW the HUD (address) bar — never underneath it.
-              // The HUD is a fixed ~44px strip pinned to the top; the WebView /
-              // waiting overlay fill the remaining area so page content stays
-              // inside the viewport and is never covered by the address bar.
-              Positioned(
-                top: _kHudHeight,
-                left: 0,
-                right: 0,
-                bottom: 0,
+              // Column layout: HUD/address bar is a fixed top strip; the WebView
+              // fills the rest via Expanded. This gives the Android VirtualDisplay/
+              // TextureView a correctly sized surface (no black band at the bottom)
+              // and removes the Stack+Positioned relayout that caused flashing/heat.
+              _HudBar(
+                title: _title,
+                url: _url,
+                loading: _loading,
+                connected: _connected,
+                canGoBack: _canGoBack,
+                passthrough: _passthrough,
+                onBack: _goBack,
+                onBookmark: _url.isNotEmpty ? _bookmarkCurrent : null,
+              ),
+              Expanded(
                 child: (_webViewReady && _url.isNotEmpty)
-                    // Virtual Display (TextureView) rendering — required for Rokid
-                    // AR waveguide. Default Hybrid Composition (SurfaceView) only
-                    // composites at the top-left corner on this display pipeline.
                     ? _buildWebView()
                     : _WaitingOverlay(btStatus: _btStatus, connected: _connected),
-              ),
-
-              // ── HUD (always on top, visible even in passthrough) ──────────
-              Positioned(
-                top: 0,
-                left: 0,
-                right: 0,
-                height: _kHudHeight,
-                child: _HudBar(
-                  title: _title,
-                  url: _url,
-                  loading: _loading,
-                  connected: _connected,
-                  canGoBack: _canGoBack,
-                  passthrough: _passthrough,
-                  onBack: _goBack,
-                  onBookmark: _url.isNotEmpty ? _bookmarkCurrent : null,
-                ),
               ),
               // Cursor is rendered as a native Android View in the DecorView
               // (see updateCursor in MainActivity.kt) so it stays visible above
