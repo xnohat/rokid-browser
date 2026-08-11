@@ -107,12 +107,14 @@ class _BrowserScreenState extends State<BrowserScreen> {
           // Paint the page dark IMMEDIATELY (before content renders) so a bright
           // white background never flashes onto the waveguide — the white flash is
           // what causes both the flashing and the heat on these glasses.
+          // Dark mode is handled by the native WebView forceDark (algorithmic
+          // USER_AGENT darkening) — no CSS invert needed, which avoids the extra
+          // repaint/flashing. Just paint the base dark so there's no white flash
+          // before the first frame.
           if (_isDark) {
-            // #fff base because _applyHardDark inverts the whole page -> ends black.
             _webController.runJavaScript(
               "document.documentElement&&document.documentElement.style"
-              ".setProperty('background','#fff','important');").catchError((_) {});
-            _applyHardDark();
+              ".setProperty('background','#000','important');").catchError((_) {});
           }
           _sendState(url: url, loading: true);
           if (!_webViewConfigured) {
@@ -265,7 +267,6 @@ class _BrowserScreenState extends State<BrowserScreen> {
     try {
       await _methodChannel.invokeMethod('setForceDark', dark);
     } catch (_) {}
-    if (dark) { await _applyHardDark(); }
     if (dark) {
       await _webController.runJavaScript(r'''
 (function(){

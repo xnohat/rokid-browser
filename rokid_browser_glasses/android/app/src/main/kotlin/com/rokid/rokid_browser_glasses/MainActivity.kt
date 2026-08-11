@@ -102,6 +102,18 @@ class MainActivity : FlutterActivity() {
                     if (enable) WebSettingsCompat.FORCE_DARK_ON else WebSettingsCompat.FORCE_DARK_OFF
                 )
             }
+            // Force darkening even for sites that DON'T provide their own dark theme
+            // (e.g. DuckDuckGo). Without this strategy, FORCE_DARK_ON leaves such
+            // sites bright. FORCE_DARK_ONLY = always apply algorithmic darkening.
+            if (WebViewFeature.isFeatureSupported(WebViewFeature.FORCE_DARK_STRATEGY)) {
+                WebSettingsCompat.setForceDarkStrategy(
+                    wv.settings,
+                    // USER_AGENT_DARKENING_ONLY = the WebView ALWAYS darkens the page
+                    // itself, ignoring whatever theme the site ships. This is what
+                    // turns bright sites like DuckDuckGo dark.
+                    WebSettingsCompat.DARK_STRATEGY_USER_AGENT_DARKENING_ONLY
+                )
+            }
         }
     }
 
