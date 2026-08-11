@@ -154,13 +154,32 @@ class _BrowserScreenState extends State<BrowserScreen> {
     '*:focus,*:focus-visible,a:focus,button:focus,input:focus{outline:none !important;'+
       'box-shadow:none !important;}'+
     'html,body{outline:none !important;border:0 !important;}';
-  // Report HTML5 fullscreen enter/exit to Flutter so the address bar can hide
-  // and the video becomes truly edge-to-edge.
+  // Report "video takes (almost) the whole screen" to Flutter so the address bar
+  // hides and the video is edge-to-edge. We do NOT rely only on the HTML5
+  // fullscreen API because sites like Facebook enlarge a <video> with CSS instead
+  // of calling requestFullscreen — so we also poll the biggest playing video's
+  // size vs the viewport.
   if(!window.__rokidFSHooked){
     window.__rokidFSHooked=true;
-    function _rfs(){ try{ RokidFS.postMessage(document.fullscreenElement?'1':'0'); }catch(e){} }
+    function _bigVideo(){
+      if(document.fullscreenElement) return true;
+      var vs=document.querySelectorAll('video'), vw=window.innerWidth, vh=window.innerHeight;
+      for(var i=0;i<vs.length;i++){
+        var v=vs[i]; if(v.paused||v.readyState<2) continue;
+        var r=v.getBoundingClientRect();
+        // video covers >=85% width AND >=70% height => treat as fullscreen
+        if(r.width>=vw*0.85 && r.height>=vh*0.70) return true;
+      }
+      return false;
+    }
+    var _last=-1;
+    function _rfs(){ var f=_bigVideo()?1:0; if(f!==_last){_last=f; try{RokidFS.postMessage(''+f);}catch(e){}} }
     document.addEventListener('fullscreenchange',_rfs,true);
     document.addEventListener('webkitfullscreenchange',_rfs,true);
+    document.addEventListener('play',_rfs,true);
+    document.addEventListener('pause',_rfs,true);
+    if(window.__rokidFSPoll) clearInterval(window.__rokidFSPoll);
+    window.__rokidFSPoll=setInterval(_rfs,700);
   }
 })();''');
           // Re-apply the user's zoom level to the freshly loaded page (no-op at 100%).
