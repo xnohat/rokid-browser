@@ -250,32 +250,31 @@ class _BrowserScreenState extends State<BrowserScreen> {
     // never leaves a black margin. (Whole-page CSS zoom/transform that also scales
     // images was tried many ways but was unreliable here — off-screen shifting,
     // side margins, Facebook overriding it.)
-    // 1) Text scales via native WebView textZoom (%) — reliable, fills width.
-    final pct = (_pageZoom * 100).round().clamp(50, 200);
-    _methodChannel.invokeMethod('setTextZoom', pct).catchError((_) {});
-    // 2) Images/media/icons scale via CSS `zoom` applied to THEMSELVES (a
-    //    stylesheet rule, NOT a wrapper — no DOM reparenting, so SPAs like
-    //    Facebook don't break). So pictures & elements shrink/grow WITH the text.
+    // Whole-page zoom (text + images + everything scales together) via CSS
+    // transform:scale on <html>, with transform-origin TOP CENTER so when the page
+    // is zoomed out and becomes narrower than the frame, the leftover space splits
+    // evenly on both sides — i.e. the page is CENTERED (no all-black on the right).
+    // No width hack, no wrapper (which broke SPAs). textZoom stays at 100 so it
+    // doesn't double-scale.
+    _methodChannel.invokeMethod('setTextZoom', 100).catchError((_) {});
     final z = _pageZoom;
     final zStr = z.toStringAsFixed(3);
     _webController.runJavaScript('''
 (function(){
-  // Clean up old experimental mechanisms WITHOUT moving live nodes.
   var de=document.documentElement;
-  de.style.removeProperty('zoom');
+  // Remove leftovers from earlier experiments.
   de.style.removeProperty('width');
   de.style.removeProperty('min-height');
-  if(document.body){document.body.style.removeProperty('width');document.body.style.removeProperty('transform');}
-  ['__rokidZoomFit','__rokidZoomStyle'].forEach(function(id){var e=document.getElementById(id);if(e)e.remove();});
-  var s=document.getElementById('__rokidMediaZoom');
-  if(!s){s=document.createElement('style');s.id='__rokidMediaZoom';(document.head||de).appendChild(s);}
-  if($z===1){ s.textContent=''; return; }
-  // `zoom` on the media element itself scales it in normal flow (no overflow,
-  // no wrapper). max-width guard keeps it inside the column.
-  s.textContent=
-    'img,video,picture,canvas,svg,image,figure,'+
-    '[role="img"],[style*="background-image"]{zoom:$zStr !important;}'+
-    'img,video,picture,canvas{max-width:100% !important;height:auto !important;}';
+  ['__rokidMediaZoom','__rokidZoomFit','__rokidZoomStyle'].forEach(function(id){var e=document.getElementById(id);if(e)e.remove();});
+  if($z===1){
+    de.style.removeProperty('transform');
+    de.style.removeProperty('transform-origin');
+    de.style.removeProperty('width');
+    return;
+  }
+  de.style.setProperty('transform','scale($zStr)','important');
+  de.style.setProperty('transform-origin','top center','important');
+  de.style.setProperty('background','#000','important');
 })();''').catchError((_) {});
   }
 
