@@ -108,9 +108,10 @@ class _BrowserScreenState extends State<BrowserScreen> {
           // white background never flashes onto the waveguide — the white flash is
           // what causes both the flashing and the heat on these glasses.
           if (_isDark) {
+            // #fff base because _applyHardDark inverts the whole page -> ends black.
             _webController.runJavaScript(
               "document.documentElement&&document.documentElement.style"
-              ".setProperty('background','#000','important');").catchError((_) {});
+              ".setProperty('background','#fff','important');").catchError((_) {});
             _applyHardDark();
           }
           _sendState(url: url, loading: true);
@@ -247,7 +248,11 @@ class _BrowserScreenState extends State<BrowserScreen> {
   if(!s){s=document.createElement('style');s.id='__rokidHardDark';
     (document.head||document.documentElement).appendChild(s);}
   s.textContent=
-    'html{background:#000 !important;}'+
+    // The whole page is inverted, so to END UP black the base must be WHITE.
+    // Also force full-height so no un-painted gap shows through (which, once
+    // inverted, would appear as a white band at the bottom).
+    'html{background:#fff !important;min-height:100vh !important;}'+
+    'body{min-height:100vh !important;background:#fff !important;}'+
     'html{filter:invert(1) hue-rotate(180deg) !important;}'+
     // Re-invert real media so images/video/canvas keep their true colors.
     'img,video,canvas,picture,image,svg image,[style*="background-image"]{'+
