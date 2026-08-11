@@ -147,6 +147,7 @@ final class BleCentral: NSObject {
 
     private var reconnectAttempts = 0
     private var skipRetrieveConnectedOnce = false
+    private var charDiscoverRetries = 0
 
     /// iOS served a stale/empty GATT cache. Cancel the connection and reconnect;
     /// CoreBluetooth re-reads the peripheral's GATT DB on a fresh connection.
@@ -344,13 +345,30 @@ extension BleCentral: CBPeripheralDelegate {
             }
         }
         dbg("chars: tx=\(txChar != nil) rx=\(rxChar != nil)")
-        // Empty/mismatched characteristics == stale iOS GATT cache. Reconnect to refresh.
+        // Empty characteristics == stale iOS GATT cache. First retry discovery a few
+        // times on the SAME connection (often the cache refreshes by attempt 2-3);
+        // only if that keeps failing do we drop the connection and rescan fresh.
         if (txChar == nil || rxChar == nil), chars.isEmpty {
-            dbg("empty chars -> stale cache, forceReconnect")
-            forceReconnect()
+            if charDiscoverRetries < 4 {
+                charDiscoverRetries += 1
+                dbg("empty chars -> retry discoverCharacteristics #\(charDiscoverRetries)")
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in
+                    guard let self = self, let p = self.peripheral else { return }
+                    if let svc = p.services?.first(where: { $0.uuid == BleCentral.serviceUUID }) {
+                        p.discoverCharacteristics(nil, for: svc)
+                    } else {
+                        self.forceReconnect()
+                    }
+                }
+            } else {
+                dbg("empty chars persist -> forceReconnect")
+                charDiscoverRetries = 0
+                forceReconnect()
+            }
             return
         }
         if txChar != nil && rxChar != nil {
+            charDiscoverRetries = 0
             let name = peripheral.name ?? peripheral.identifier.uuidString
             onStatus?("connected:\(name)")
             scanRetryTimer?.invalidate(); scanRetryTimer = nil
