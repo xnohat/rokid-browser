@@ -9,6 +9,9 @@ import 'package:webview_flutter_android/webview_flutter_android.dart';
 const _kGreen = Color(0xFF00FF00);
 const _kBlack = Color(0xFF000000);
 const _kSoftGreen = Color(0xFF88FF88);
+// Fixed height of the top HUD/address strip. Content is laid out below this so
+// the address bar never overlaps the web page.
+const double _kHudHeight = 44;
 
 class BrowserScreen extends StatefulWidget {
   const BrowserScreen({super.key});
@@ -815,19 +818,29 @@ class _BrowserScreenState extends State<BrowserScreen> {
           backgroundColor: _kBlack,
           body: Stack(
             children: [
-              if (_webViewReady && _url.isNotEmpty)
-                // Virtual Display (TextureView) rendering — required for Rokid AR
-                // waveguide. Default Hybrid Composition (SurfaceView) only composites
-                // at the top-left corner on this display pipeline.
-                _buildWebView()
-              else
-                _WaitingOverlay(btStatus: _btStatus, connected: _connected),
+              // Content sits BELOW the HUD (address) bar — never underneath it.
+              // The HUD is a fixed ~44px strip pinned to the top; the WebView /
+              // waiting overlay fill the remaining area so page content stays
+              // inside the viewport and is never covered by the address bar.
+              Positioned(
+                top: _kHudHeight,
+                left: 0,
+                right: 0,
+                bottom: 0,
+                child: (_webViewReady && _url.isNotEmpty)
+                    // Virtual Display (TextureView) rendering — required for Rokid
+                    // AR waveguide. Default Hybrid Composition (SurfaceView) only
+                    // composites at the top-left corner on this display pipeline.
+                    ? _buildWebView()
+                    : _WaitingOverlay(btStatus: _btStatus, connected: _connected),
+              ),
 
               // ── HUD (always on top, visible even in passthrough) ──────────
               Positioned(
                 top: 0,
                 left: 0,
                 right: 0,
+                height: _kHudHeight,
                 child: _HudBar(
                   title: _title,
                   url: _url,
@@ -946,8 +959,9 @@ class _HudBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      color: _kBlack.withValues(alpha: 0.85),
-      padding: const EdgeInsets.fromLTRB(6, 28, 10, 6),
+      height: _kHudHeight,
+      color: _kBlack, // opaque so page content never bleeds through the bar
+      padding: const EdgeInsets.fromLTRB(6, 20, 10, 6),
       child: Row(
         children: [
           // Back button — always present, dims when unavailable
