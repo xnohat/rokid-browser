@@ -271,9 +271,10 @@ class _BrowserScreenState extends State<BrowserScreen> {
   }
   de.style.setProperty('transform','scale($zStr)','important');
   // Scale about the horizontal center but from the TOP of the CONTENT area (just
-  // below the ~46px address bar), not y=0 — otherwise the top of the page scales
-  // up under the bar and its first row gets clipped.
-  de.style.setProperty('transform-origin','center 46px','important');
+  // below the address bar = _kHudHeight), not y=0 — otherwise the top of the page
+  // scales up under the bar and its first row gets clipped. Uses the shared HUD
+  // height constant so the bar and the zoom pivot never drift apart.
+  de.style.setProperty('transform-origin','center ${_kHudHeight.round()}px','important');
   de.style.setProperty('background','#000','important');
 })();''').catchError((_) {});
   }
