@@ -238,30 +238,22 @@ class _BrowserScreenState extends State<BrowserScreen> {
     // exactly as the page shipped it (width=device-width) — we NEVER touch the
     // viewport meta here, so the frame keeps filling the screen; only the text
     // (and text-sized elements) grow/shrink, like a browser's text-size control.
-    final pct = (_pageZoom * 100).round().clamp(50, 200);
-    // Text scales via native textZoom (keeps the layout viewport = full screen).
-    _methodChannel.invokeMethod('setTextZoom', pct).catchError((_) {});
-    // Also scale images / media / icons by the same factor so they shrink/grow
-    // together with the text (the user wanted elements to zoom too, not just text)
-    // — WITHOUT touching the viewport width, so the page frame still fills the
-    // screen. transform:scale keeps them in normal flow via transform-origin.
+    // Desktop-browser style zoom (Ctrl +/-): scale the WHOLE document uniformly
+    // with CSS zoom on <html>. Everything — text, images, buttons, boxes, padding
+    // — shrinks/grows together. Zooming out shows the page smaller centered in the
+    // frame (a little margin, exactly like a desktop browser at <100%); zooming in
+    // enlarges everything. Reset textZoom to 100 so it doesn't double-scale text.
+    _methodChannel.invokeMethod('setTextZoom', 100).catchError((_) {});
     final z = _pageZoom;
     _webController.runJavaScript('''
 (function(){
   var s=document.getElementById('__rokidZoomFit'); if(s)s.remove();
+  var mz=document.getElementById('__rokidMediaZoom'); if(mz)mz.remove();
   var m=document.querySelector('meta[name="viewport"]');
   if(m)m.setAttribute('content','width=device-width,initial-scale=1.0');
-  var z=$z;
-  var d=document.getElementById('__rokidMediaZoom');
-  if(!d){d=document.createElement('style');d.id='__rokidMediaZoom';(document.head||document.documentElement).appendChild(d);}
-  if(z===1){d.textContent='';}
-  else{
-    // Scale replaced elements (images/videos/svg/icons) about their top-left so
-    // they resize with the text but keep flowing; max-width guard prevents any
-    // horizontal overflow.
-    d.textContent='img,video,svg,picture,canvas{zoom:'+z+' !important;}'+
-      'img,video,svg,picture,canvas{max-width:100% !important;height:auto !important;}';
-  }
+  // Uniform page zoom. `zoom` scales the whole rendering box including layout.
+  document.documentElement.style.setProperty('zoom','$z','important');
+  document.documentElement.style.setProperty('background','#000','important');
 })();''').catchError((_) {});
   }
 
