@@ -403,6 +403,8 @@ class _BrowserControlScreenState extends State<BrowserControlScreen> {
                           {'type': 'browser_cmd', 'action': 'video_theater'}),
                       onMinimize: () => _sendCmd(
                           {'type': 'browser_cmd', 'action': 'minimize'}),
+                      onToggleHud: () => _sendCmd(
+                          {'type': 'browser_cmd', 'action': 'toggle_hud'}),
                     ),
                     const SizedBox(height: 28),
                     _KeyboardControls(
@@ -1292,6 +1294,7 @@ class _ZoomControls extends StatelessWidget {
   final VoidCallback onZoomOut;
   final VoidCallback onTheater;
   final VoidCallback onMinimize;
+  final VoidCallback onToggleHud;
 
   const _ZoomControls({
     required this.enabled,
@@ -1299,6 +1302,7 @@ class _ZoomControls extends StatelessWidget {
     required this.onZoomOut,
     required this.onTheater,
     required this.onMinimize,
+    required this.onToggleHud,
   });
 
   @override
@@ -1346,6 +1350,16 @@ class _ZoomControls extends StatelessWidget {
               ),
             ),
           ],
+        ),
+        const SizedBox(height: 10),
+        // Show/hide the glasses address bar (handy for watching video edge-to-edge).
+        SizedBox(
+          width: double.infinity,
+          child: _CtrlButton(
+            icon: Icons.web_asset_off,
+            label: 'Ẩn / hiện thanh URL',
+            onPressed: enabled ? onToggleHud : null,
+          ),
         ),
       ],
     );

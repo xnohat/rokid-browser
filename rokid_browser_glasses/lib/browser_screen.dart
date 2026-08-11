@@ -169,9 +169,13 @@ class _BrowserScreenState extends State<BrowserScreen> {
       for(var i=0;i<vs.length;i++){
         var v=vs[i]; if(v.paused||v.readyState<2) continue;
         var r=v.getBoundingClientRect();
-        // Strong evidence for CSS "fullscreen": playing video covers ~90% width,
-        // ~75% height, and sits near the top-left edge.
-        if(r.width>=vw*0.90 && r.height>=vh*0.75 && r.top<=vh*0.15 && r.left<=vw*0.10) return true;
+        // A big PLAYING video (covers most of the height OR width) => treat as
+        // fullscreen and hide the bar. Lower height threshold so vertical Reels
+        // (tall, narrower) also qualify.
+        var coversH = r.height>=vh*0.62;
+        var coversW = r.width>=vw*0.85;
+        var onScreen = r.top<vh*0.5 && r.bottom>vh*0.3;
+        if(onScreen && (coversH || coversW)) return true;
       }
       return false;
     }
@@ -627,6 +631,14 @@ class _BrowserScreenState extends State<BrowserScreen> {
         final dark = cmd['dark'] as bool? ?? true;
         if (mounted) setState(() => _isDark = dark);
         if (_url.isNotEmpty) await _applyTheme(dark);
+      case 'toggle_hud':
+        // Manual show/hide of the address bar (for videos where auto-detect
+        // doesn't fire). Reuses _videoFullscreen: true = bar hidden.
+        if (mounted) {
+          final hide = !_videoFullscreen;
+          setState(() => _videoFullscreen = hide);
+          await _applyHudInset(fullscreen: hide);
+        }
       case 'minimize':
         if (_theaterMode) {
           _exitTheaterMode();
