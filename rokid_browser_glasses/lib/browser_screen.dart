@@ -146,6 +146,9 @@ class _BrowserScreenState extends State<BrowserScreen> {
           await _applyHudInset();
           // Re-apply after zoom/viewport change triggers Google's layout re-check
           await _applyTheme(_isDark);
+          // Deterministic CSS dark pass (covers sites native force-dark misses,
+          // e.g. m.facebook.com) — no invert filter, so low GPU cost.
+          if (_isDark) await _applyHardDark();
 
           final title = await _webController.getTitle() ?? '';
           final canGoBack = await _webController.canGoBack();
@@ -254,23 +257,67 @@ class _BrowserScreenState extends State<BrowserScreen> {
   /// / forceDark and keep a bright background. Inverts the whole page (white->black)
   /// and re-inverts media so photos/videos look normal. A dark page draws far less
   /// light on the waveguide → much less flashing and heat.
+  /// Deterministic dark mode WITHOUT a full-page invert filter (which forces
+  /// expensive offscreen compositing → heat/flashing on the waveguide). We:
+  ///  1. neutralize the site's own light color-scheme so native force-dark can act,
+  ///  2. paint a dark base + light text,
+  ///  3. re-color near-white opaque backgrounds to dark in a single computed pass
+  ///     (media/inputs excluded), with a lightweight MutationObserver for new nodes.
   Future<void> _applyHardDark() async {
     try {
       await _webController.runJavaScript(r'''
 (function(){
-  var s=document.getElementById('__rokidHardDark');
-  if(!s){s=document.createElement('style');s.id='__rokidHardDark';
+  // 1) Kill light color-scheme hints so UA darkening isn't overridden.
+  try{
+    var cs=document.querySelector('meta[name="color-scheme"]');
+    if(cs)cs.content='dark';
+    document.documentElement.style.colorScheme='dark';
+  }catch(e){}
+  // 2) Base dark style.
+  var s=document.getElementById('__rokidDark');
+  if(!s){s=document.createElement('style');s.id='__rokidDark';
     (document.head||document.documentElement).appendChild(s);}
   s.textContent=
-    // The whole page is inverted, so to END UP black the base must be WHITE.
-    // Also force full-height so no un-painted gap shows through (which, once
-    // inverted, would appear as a white band at the bottom).
-    'html{background:#fff !important;min-height:100vh !important;}'+
-    'body{min-height:100vh !important;background:#fff !important;}'+
-    'html{filter:invert(1) hue-rotate(180deg) !important;}'+
-    // Re-invert real media so images/video/canvas keep their true colors.
-    'img,video,canvas,picture,image,svg image,[style*="background-image"]{'+
-      'filter:invert(1) hue-rotate(180deg) !important;}';
+    'html,body{background:#000 !important;color:#cfcfcf !important;}'+
+    'a{color:#8ab4f8 !important;}';
+  // 3) One-shot recolor of near-white opaque backgrounds + near-black text.
+  function near(c,hi){ // c='rgb(r,g,b...)' ; hi=true->near white, false->near black
+    var m=/rgb\((\d+),\s*(\d+),\s*(\d+)/i.exec(c)||
+          /rgba\((\d+),\s*(\d+),\s*(\d+),\s*([\d.]+)/i.exec(c);
+    if(!m)return false;
+    var r=+m[1],g=+m[2],b=+m[3],a=m[4]===undefined?1:+m[4];
+    if(a<0.5)return false;
+    var L=(r+g+b)/3;
+    return hi?L>210:L<40;
+  }
+  var SKIP={IMG:1,VIDEO:1,CANVAS:1,SVG:1,PICTURE:1,IFRAME:1,INPUT:1,TEXTAREA:1,SELECT:1};
+  function fix(el){
+    if(!el||el.nodeType!==1||SKIP[el.tagName])return;
+    var cs=getComputedStyle(el);
+    if(cs.backgroundImage&&cs.backgroundImage!=='none'){/*leave images*/}
+    else if(near(cs.backgroundColor,true))el.style.setProperty('background-color','#111','important');
+    if(near(cs.color,false))el.style.setProperty('color','#d0d0d0','important');
+  }
+  function pass(root){
+    var all=root.querySelectorAll('*');
+    for(var i=0;i<all.length && i<4000;i++)fix(all[i]);
+  }
+  pass(document);
+  // Lightweight observer for SPA / late nodes (batched, no polling interval).
+  if(!window.__rokidDarkObs){
+    try{
+      window.__rokidDarkObs=new MutationObserver(function(muts){
+        for(var i=0;i<muts.length;i++){
+          var a=muts[i].addedNodes;
+          for(var j=0;j<a.length;j++){
+            if(a[j].nodeType===1){fix(a[j]);
+              if(a[j].children&&a[j].children.length)pass(a[j]);}
+          }
+        }
+      });
+      window.__rokidDarkObs.observe(document.documentElement,{childList:true,subtree:true});
+    }catch(e){}
+  }
 })();''');
     } catch (_) {}
   }
