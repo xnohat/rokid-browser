@@ -270,7 +270,10 @@ class _BrowserScreenState extends State<BrowserScreen> {
     return;
   }
   de.style.setProperty('transform','scale($zStr)','important');
-  de.style.setProperty('transform-origin','top center','important');
+  // Scale about the horizontal center but from the TOP of the CONTENT area (just
+  // below the ~46px address bar), not y=0 — otherwise the top of the page scales
+  // up under the bar and its first row gets clipped.
+  de.style.setProperty('transform-origin','center 46px','important');
   de.style.setProperty('background','#000','important');
 })();''').catchError((_) {});
   }
