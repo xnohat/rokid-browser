@@ -34,7 +34,7 @@ class MainActivity : FlutterActivity() {
     private val mainHandler = Handler(Looper.getMainLooper())
     private var passthroughView: android.view.View? = null
     private var cursorView: android.view.View? = null
-    private var dimScrimView: android.view.View? = null
+    private var userDimLevel = 0.55f // last brightness-dim chosen from the phone
     private var cursorDotNormal: android.graphics.drawable.GradientDrawable? = null
     private var cursorDotDrag: android.graphics.drawable.GradientDrawable? = null
     private var cursorBroughtToFront = false
@@ -98,13 +98,8 @@ class MainActivity : FlutterActivity() {
     /// light (it only muddies the content). The one thing that genuinely cuts light
     /// and heat is lowering the actual panel brightness. So this only sets
     /// screenBrightness — no overlay View. alpha here is reused as a "dim amount".
-    private fun setDimScrim(alpha: Float) {
+    private fun setScreenDim(alpha: Float) {
         runOnUiThread {
-            // Remove any legacy overlay from earlier builds.
-            dimScrimView?.let {
-                (window.decorView as? android.view.ViewGroup)?.removeView(it)
-                dimScrimView = null
-            }
             val a = alpha.coerceIn(0f, 1f)
             window.attributes = window.attributes.apply {
                 screenBrightness = if (a <= 0f)
@@ -300,15 +295,16 @@ class MainActivity : FlutterActivity() {
                     val enable = call.arguments as? Boolean ?: true
                     val wv = findWebView(window.decorView)
                     if (wv != null) applyForceDark(wv, enable)
-                    // Lower actual panel brightness when dark mode is on — the only
-                    // thing that genuinely cuts emitted light/heat on the waveguide
-                    // for pages CSS can't darken (Facebook feed, iframes, canvas).
-                    setDimScrim(if (enable) 0.55f else 0f)
+                    // Lower panel brightness when dark mode is on. Use the user's
+                    // last chosen dim level (not a hard-coded default) so a page
+                    // navigation / theme re-apply never resets their slider choice.
+                    setScreenDim(if (enable) userDimLevel else 0f)
                     result.success(wv != null)
                 }
                 "setDim" -> {
                     val v = (call.arguments as? Number)?.toFloat() ?: 0f
-                    setDimScrim(v)
+                    userDimLevel = v.coerceIn(0f, 1f) // remember the user's choice
+                    setScreenDim(userDimLevel)
                     result.success(true)
                 }
                 "setThirdPartyCookies" -> {

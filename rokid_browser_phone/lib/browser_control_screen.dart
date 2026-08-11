@@ -52,7 +52,8 @@ class _BrowserControlScreenState extends State<BrowserControlScreen> {
   bool _canGoBack = false;
   bool _canGoForward = false;
   bool _glassesIsDark = true;
-  double _glassesDim = 0.55; // 0=full brightness .. 0.8=dimmest
+  double _glassesDim = 0.55; // 0=full brightness .. 1.0=dimmest
+  DateTime? _lastDimSent;
   String _btStatus = 'listening';
   bool _resetting = false;
   bool _wifiEnabled = false;
@@ -157,7 +158,18 @@ class _BrowserControlScreenState extends State<BrowserControlScreen> {
         final type = json['type'] as String?;
         if (type == 'bt_status') {
           if (mounted) {
-            setState(() => _btStatus = json['status'] as String? ?? 'unknown');
+            final status = json['status'] as String? ?? 'unknown';
+            final wasConnected = _isConnected;
+            setState(() => _btStatus = status);
+            // On a fresh connection, re-push the user's brightness/dim choice so it
+            // survives glasses-app relaunch / reconnect (Activity resets brightness).
+            if (!wasConnected && _isConnected) {
+              _sendCmd({
+                'type': 'browser_cmd',
+                'action': 'set_dim',
+                'value': _glassesDim,
+              });
+            }
           }
         } else if (type == 'browser_state') {
           if (mounted) {
@@ -451,8 +463,24 @@ class _BrowserControlScreenState extends State<BrowserControlScreen> {
                     _DimControls(
                       enabled: _isConnected,
                       value: _glassesDim,
+                      // While dragging: update the label only + throttle sends to
+                      // ~1 per 150ms so we don't flood BLE with dozens of commands.
                       onChanged: (v) {
                         setState(() => _glassesDim = v);
+                        final now = DateTime.now();
+                        if (_lastDimSent == null ||
+                            now.difference(_lastDimSent!).inMilliseconds > 150) {
+                          _lastDimSent = now;
+                          _sendCmd({
+                            'type': 'browser_cmd',
+                            'action': 'set_dim',
+                            'value': v,
+                          });
+                        }
+                      },
+                      // Always send the final value when the drag ends.
+                      onChangeEnd: (v) {
+                        _lastDimSent = DateTime.now();
                         _sendCmd({
                           'type': 'browser_cmd',
                           'action': 'set_dim',
@@ -1566,11 +1594,13 @@ class _DimControls extends StatelessWidget {
   final bool enabled;
   final double value;
   final void Function(double) onChanged;
+  final void Function(double) onChangeEnd;
 
   const _DimControls({
     required this.enabled,
     required this.value,
     required this.onChanged,
+    required this.onChangeEnd,
   });
 
   @override
@@ -1592,6 +1622,7 @@ class _DimControls extends StatelessWidget {
                 divisions: 20,
                 label: 'Dim $pct%',
                 onChanged: enabled ? onChanged : null,
+                onChangeEnd: enabled ? onChangeEnd : null,
               ),
             ),
             const Icon(Icons.brightness_high, size: 18),
