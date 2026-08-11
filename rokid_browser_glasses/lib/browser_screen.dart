@@ -145,10 +145,7 @@ class _BrowserScreenState extends State<BrowserScreen> {
       'box-shadow:none !important;}'+
     'html,body{outline:none !important;border:0 !important;}';
 })();''');
-          // Reset the cached base viewport (new page = fresh layout) then re-apply
-          // the user's zoom level. If never zoomed, this is a no-op at 100%.
-          await _webController.runJavaScript(
-              'window.__rokidBaseVW=0;').catchError((_) {});
+          // Re-apply the user's zoom level to the freshly loaded page (no-op at 100%).
           if (_pageZoom != 1.0) _applyZoom();
           // Reserve the HUD strip INSIDE the page (the WebView itself is full-screen
           // and sits UNDER the address bar). A persistent scroll-padding + a spacer
