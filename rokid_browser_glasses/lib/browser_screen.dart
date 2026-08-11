@@ -49,6 +49,7 @@ class _BrowserScreenState extends State<BrowserScreen> {
   Timer? _configRetryTimer;
   bool _passthrough = false;
   bool _theaterMode = false;
+  bool _videoFullscreen = false; // true while a page video is in HTML5 fullscreen
   int _lastGestureMs = 0; // debounce for touchpad swipes
   static const _gestureDebounceMs = 700;
 
@@ -86,6 +87,14 @@ class _BrowserScreenState extends State<BrowserScreen> {
   void _initWebView() {
     _webController = WebViewController()
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
+      ..addJavaScriptChannel('RokidFS', onMessageReceived: (msg) {
+        // The page reports HTML5 fullscreen enter/exit; hide the HUD while a
+        // video is fullscreen so it's truly edge-to-edge.
+        final fs = msg.message == '1';
+        if (mounted && fs != _videoFullscreen) {
+          setState(() => _videoFullscreen = fs);
+        }
+      })
       ..setBackgroundColor(_kBlack)
       ..setUserAgent(
         'Mozilla/5.0 (Linux; Android 12; Pixel 6) '
@@ -105,6 +114,7 @@ class _BrowserScreenState extends State<BrowserScreen> {
             _url = url;
             _loading = true;
             _theaterMode = false;
+            _videoFullscreen = false;
           });
           // Paint the page dark IMMEDIATELY (before content renders) so a bright
           // white background never flashes onto the waveguide — the white flash is
@@ -144,6 +154,14 @@ class _BrowserScreenState extends State<BrowserScreen> {
     '*:focus,*:focus-visible,a:focus,button:focus,input:focus{outline:none !important;'+
       'box-shadow:none !important;}'+
     'html,body{outline:none !important;border:0 !important;}';
+  // Report HTML5 fullscreen enter/exit to Flutter so the address bar can hide
+  // and the video becomes truly edge-to-edge.
+  if(!window.__rokidFSHooked){
+    window.__rokidFSHooked=true;
+    function _rfs(){ try{ RokidFS.postMessage(document.fullscreenElement?'1':'0'); }catch(e){} }
+    document.addEventListener('fullscreenchange',_rfs,true);
+    document.addEventListener('webkitfullscreenchange',_rfs,true);
+  }
 })();''');
           // Re-apply the user's zoom level to the freshly loaded page (no-op at 100%).
           if (_pageZoom != 1.0) _applyZoom();
@@ -1145,22 +1163,25 @@ class _BrowserScreenState extends State<BrowserScreen> {
                     ? _buildWebView()
                     : _WaitingOverlay(btStatus: _btStatus, connected: _connected),
               ),
-              Positioned(
-                top: 0,
-                left: 0,
-                right: 0,
-                height: _kHudHeight,
-                child: _HudBar(
-                  title: _title,
-                  url: _url,
-                  loading: _loading,
-                  connected: _connected,
-                  canGoBack: _canGoBack,
-                  passthrough: _passthrough,
-                  onBack: _goBack,
-                  onBookmark: _url.isNotEmpty ? _bookmarkCurrent : null,
+              // Hide the address bar while a video is fullscreen / in theater mode
+              // so the video is truly edge-to-edge (the HUD was covering its top).
+              if (!_theaterMode && !_videoFullscreen)
+                Positioned(
+                  top: 0,
+                  left: 0,
+                  right: 0,
+                  height: _kHudHeight,
+                  child: _HudBar(
+                    title: _title,
+                    url: _url,
+                    loading: _loading,
+                    connected: _connected,
+                    canGoBack: _canGoBack,
+                    passthrough: _passthrough,
+                    onBack: _goBack,
+                    onBookmark: _url.isNotEmpty ? _bookmarkCurrent : null,
+                  ),
                 ),
-              ),
               // Cursor is rendered as a native Android View in the DecorView
               // (see updateCursor in MainActivity.kt) so it stays visible above
               // YouTube's SurfaceView fullscreen video layer.
