@@ -104,6 +104,15 @@ class _BrowserScreenState extends State<BrowserScreen> {
             _loading = true;
             _theaterMode = false;
           });
+          // Paint the page dark IMMEDIATELY (before content renders) so a bright
+          // white background never flashes onto the waveguide — the white flash is
+          // what causes both the flashing and the heat on these glasses.
+          if (_isDark) {
+            _webController.runJavaScript(
+              "document.documentElement&&document.documentElement.style"
+              ".setProperty('background','#000','important');").catchError((_) {});
+            _applyHardDark();
+          }
           _sendState(url: url, loading: true);
           if (!_webViewConfigured) {
             _startConfigureRetry();
@@ -125,6 +134,11 @@ class _BrowserScreenState extends State<BrowserScreen> {
   if(document.body)document.body.style.zoom='$zoom';
   document.querySelectorAll('video').forEach(function(v){v.muted=false;if(v.volume>0.5)v.volume=0.5;});
 })();''');
+          // Reserve the HUD strip INSIDE the page (the WebView itself is full-screen
+          // and sits UNDER the address bar). A persistent scroll-padding + a spacer
+          // push the page content below the address bar so it is never overlapped,
+          // and because the WebView surface stays full-size there is no black band.
+          await _applyHudInset();
           // Re-apply after zoom/viewport change triggers Google's layout re-check
           await _applyTheme(_isDark);
 
@@ -202,10 +216,51 @@ class _BrowserScreenState extends State<BrowserScreen> {
     });
   }
 
+  /// Push the page content below the top HUD/address strip by injecting a fixed
+  /// spacer + top padding, so a full-screen WebView never has the address bar
+  /// overlapping its content. Idempotent (safe to call on every page load).
+  Future<void> _applyHudInset() async {
+    // HUD is _kHudHeight logical px in Flutter; CSS px on this viewport match
+    // closely enough. A touch of extra margin avoids clipping the first line.
+    const inset = 46;
+    try {
+      await _webController.runJavaScript('''
+(function(){
+  var H=$inset;
+  var s=document.getElementById('__rokidHudInset');
+  if(!s){s=document.createElement('style');s.id='__rokidHudInset';document.head.appendChild(s);}
+  s.textContent='html{scroll-padding-top:'+H+'px !important;}'+
+                'body{padding-top:'+H+'px !important;box-sizing:border-box !important;}';
+})();''');
+    } catch (_) {}
+  }
+
+  /// Aggressive last-resort dark mode for sites that ignore prefers-color-scheme
+  /// / forceDark and keep a bright background. Inverts the whole page (white->black)
+  /// and re-inverts media so photos/videos look normal. A dark page draws far less
+  /// light on the waveguide → much less flashing and heat.
+  Future<void> _applyHardDark() async {
+    try {
+      await _webController.runJavaScript(r'''
+(function(){
+  var s=document.getElementById('__rokidHardDark');
+  if(!s){s=document.createElement('style');s.id='__rokidHardDark';
+    (document.head||document.documentElement).appendChild(s);}
+  s.textContent=
+    'html{background:#000 !important;}'+
+    'html{filter:invert(1) hue-rotate(180deg) !important;}'+
+    // Re-invert real media so images/video/canvas keep their true colors.
+    'img,video,canvas,picture,image,svg image,[style*="background-image"]{'+
+      'filter:invert(1) hue-rotate(180deg) !important;}';
+})();''');
+    } catch (_) {}
+  }
+
   Future<void> _applyTheme(bool dark) async {
     try {
       await _methodChannel.invokeMethod('setForceDark', dark);
     } catch (_) {}
+    if (dark) { await _applyHardDark(); }
     if (dark) {
       await _webController.runJavaScript(r'''
 (function(){
@@ -820,26 +875,34 @@ class _BrowserScreenState extends State<BrowserScreen> {
         },
         child: Scaffold(
           backgroundColor: _kBlack,
-          body: Column(
+          // The WebView is kept FULL-SCREEN from first creation (a stable size the
+          // Android VirtualDisplay/TextureView is happy with — resizing it after
+          // creation produced a black band at the bottom). The HUD/address bar is
+          // an overlay pinned to the top; page content is pushed below it by CSS
+          // padding injected into the page (_applyHudInset) so nothing overlaps or
+          // is cut off.
+          body: Stack(
             children: [
-              // Column layout: HUD/address bar is a fixed top strip; the WebView
-              // fills the rest via Expanded. This gives the Android VirtualDisplay/
-              // TextureView a correctly sized surface (no black band at the bottom)
-              // and removes the Stack+Positioned relayout that caused flashing/heat.
-              _HudBar(
-                title: _title,
-                url: _url,
-                loading: _loading,
-                connected: _connected,
-                canGoBack: _canGoBack,
-                passthrough: _passthrough,
-                onBack: _goBack,
-                onBookmark: _url.isNotEmpty ? _bookmarkCurrent : null,
-              ),
-              Expanded(
+              Positioned.fill(
                 child: (_webViewReady && _url.isNotEmpty)
                     ? _buildWebView()
                     : _WaitingOverlay(btStatus: _btStatus, connected: _connected),
+              ),
+              Positioned(
+                top: 0,
+                left: 0,
+                right: 0,
+                height: _kHudHeight,
+                child: _HudBar(
+                  title: _title,
+                  url: _url,
+                  loading: _loading,
+                  connected: _connected,
+                  canGoBack: _canGoBack,
+                  passthrough: _passthrough,
+                  onBack: _goBack,
+                  onBookmark: _url.isNotEmpty ? _bookmarkCurrent : null,
+                ),
               ),
               // Cursor is rendered as a native Android View in the DecorView
               // (see updateCursor in MainActivity.kt) so it stays visible above
