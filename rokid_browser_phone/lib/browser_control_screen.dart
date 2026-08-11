@@ -438,6 +438,10 @@ class _BrowserControlScreenState extends State<BrowserControlScreen> {
                         'type': 'browser_cmd',
                         'action': 'keyboard_backspace',
                       }),
+                      onEnter: () => _sendCmd({
+                        'type': 'browser_cmd',
+                        'action': 'keyboard_enter',
+                      }),
                     ),
                     const SizedBox(height: 28),
                     _SecurityControls(
@@ -1358,11 +1362,13 @@ class _KeyboardControls extends StatefulWidget {
   final bool enabled;
   final void Function(String text) onType;
   final VoidCallback onBackspace;
+  final VoidCallback onEnter;
 
   const _KeyboardControls({
     required this.enabled,
     required this.onType,
     required this.onBackspace,
+    required this.onEnter,
   });
 
   @override
@@ -1379,6 +1385,15 @@ class _KeyboardControlsState extends State<_KeyboardControls> {
   }
 
   void _send() {
+    final text = _ctrl.text;
+    if (text.isEmpty) return;
+    widget.onType(text);
+    // Submit the field right after typing (search boxes / login forms need Enter).
+    widget.onEnter();
+    _ctrl.clear();
+  }
+
+  void _sendNoEnter() {
     final text = _ctrl.text;
     if (text.isEmpty) return;
     widget.onType(text);
@@ -1445,6 +1460,25 @@ class _KeyboardControlsState extends State<_KeyboardControls> {
               ),
             ),
             const SizedBox(width: 8),
+            // Standalone Enter/Go — submits the focused field on the glasses
+            // (search boxes, login forms) without typing anything new.
+            SizedBox(
+              height: 48,
+              width: 48,
+              child: OutlinedButton(
+                onPressed: widget.enabled ? widget.onEnter : null,
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: Colors.blueAccent,
+                  side: const BorderSide(color: Colors.blueAccent),
+                  padding: EdgeInsets.zero,
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(10)),
+                ),
+                child: const Icon(Icons.subdirectory_arrow_left, size: 20),
+              ),
+            ),
+            const SizedBox(width: 8),
+            // Type the text AND press Enter (submits search/login in one tap).
             FilledButton(
               onPressed: widget.enabled ? _send : null,
               style: FilledButton.styleFrom(

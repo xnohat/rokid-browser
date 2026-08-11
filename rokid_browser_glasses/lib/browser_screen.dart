@@ -634,6 +634,73 @@ class _BrowserScreenState extends State<BrowserScreen> {
     else{var s=el.selectionStart;if(s>0){el.setRangeText('',s-1,s,'end');el.dispatchEvent(new InputEvent('input',{bubbles:true,inputType:'deleteContentBackward'}));}}
   }catch(e){}
 })()''');
+      case 'keyboard_enter':
+        _webController.runJavaScript(r'''
+(function(){
+  function _deepActive(doc){
+    var el=doc.activeElement;
+    if(!el)return null;
+    if(el.shadowRoot&&el.shadowRoot.activeElement)return _deepActive(el.shadowRoot);
+    if(el.tagName==='IFRAME'){try{var id=el.contentDocument&&_deepActive(el.contentDocument);if(id)return id;}catch(e){}}
+    return el;
+  }
+  var el=_deepActive(document)||document.body;
+  function fire(type){
+    el.dispatchEvent(new KeyboardEvent(type,{key:'Enter',code:'Enter',keyCode:13,which:13,bubbles:true,cancelable:true}));
+  }
+  el.focus&&el.focus();
+  fire('keydown'); fire('keypress'); fire('keyup');
+  // If it's a plain input inside a form, submitting the form is the most reliable
+  // way to trigger search/login (many sites only act on form submit).
+  try{
+    if(el.form){
+      // Prefer clicking the form's submit button so JS handlers run.
+      var btn=el.form.querySelector('button[type="submit"],input[type="submit"],button:not([type])');
+      if(btn){btn.click();}
+      else if(typeof el.form.requestSubmit==='function'){el.form.requestSubmit();}
+      else{el.form.submit();}
+    }
+  }catch(e){}
+})()''');
+      case 'keyboard_key':
+        // Generic key press (Tab, ArrowLeft/Right/Up/Down, etc.) dispatched to the
+        // focused element on the page.
+        final key = cmd['key'] as String? ?? '';
+        if (key.isNotEmpty) {
+          final keyMap = <String, int>{
+            'Tab': 9, 'ArrowLeft': 37, 'ArrowUp': 38,
+            'ArrowRight': 39, 'ArrowDown': 40,
+          };
+          final code = keyMap[key] ?? 0;
+          _webController.runJavaScript('''
+(function(){
+  function _deepActive(doc){
+    var el=doc.activeElement;
+    if(!el)return null;
+    if(el.shadowRoot&&el.shadowRoot.activeElement)return _deepActive(el.shadowRoot);
+    if(el.tagName==='IFRAME'){try{var id=el.contentDocument&&_deepActive(el.contentDocument);if(id)return id;}catch(e){}}
+    return el;
+  }
+  var el=_deepActive(document)||document.body;
+  var K='$key', C=$code;
+  function fire(t){el.dispatchEvent(new KeyboardEvent(t,{key:K,code:K,keyCode:C,which:C,bubbles:true,cancelable:true}));}
+  el.focus&&el.focus();
+  fire('keydown'); fire('keyup');
+  // Tab moves focus; emulate it since synthetic KeyboardEvent doesn't change focus.
+  if(K==='Tab'){
+    var f=Array.prototype.slice.call(document.querySelectorAll(
+      'a[href],button,input,select,textarea,[tabindex]:not([tabindex="-1"])'))
+      .filter(function(e){return e.offsetParent!==null&&!e.disabled;});
+    var i=f.indexOf(el);
+    var next=f[(i+1)%f.length]; if(next)next.focus();
+  }
+  // Arrow keys: also scroll the page a little so navigation feels responsive.
+  if(K==='ArrowDown')window.scrollBy(0,60);
+  else if(K==='ArrowUp')window.scrollBy(0,-60);
+  else if(K==='ArrowRight')window.scrollBy(40,0);
+  else if(K==='ArrowLeft')window.scrollBy(-40,0);
+})()''');
+        }
       case 'volume_up':
         _adjustMediaVolume(0.05);
       case 'volume_down':
