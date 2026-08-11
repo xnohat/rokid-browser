@@ -49,6 +49,23 @@ final class BleCentral: NSObject {
     override init() {
         super.init()
         central = CBCentralManager(delegate: self, queue: .main)
+        dbg("init")
+    }
+
+    // File logger — writes to Documents/ble.log so we can pull it with devicectl.
+    private func dbg(_ msg: String) {
+        NSLog("[BleCentral] \(msg)")
+        let line = "\(Date().timeIntervalSince1970) \(msg)\n"
+        if let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first {
+            let url = dir.appendingPathComponent("ble.log")
+            if let data = line.data(using: .utf8) {
+                if let fh = try? FileHandle(forWritingTo: url) {
+                    fh.seekToEndOfFile(); fh.write(data); try? fh.close()
+                } else {
+                    try? line.write(to: url, atomically: true, encoding: .utf8)
+                }
+            }
+        }
     }
 
     // MARK: - Public API (mirrors the old MethodChannel surface)
@@ -128,18 +145,41 @@ final class BleCentral: NSObject {
 
     // MARK: - Internals
 
+    private var reconnectAttempts = 0
+    private var skipRetrieveConnectedOnce = false
+
+    /// iOS served a stale/empty GATT cache. Cancel the connection and reconnect;
+    /// CoreBluetooth re-reads the peripheral's GATT DB on a fresh connection.
+    private func forceReconnect() {
+        guard let p = peripheral else { beginScan(); return }
+        reconnectAttempts += 1
+        txChar = nil; rxChar = nil
+        dbg("forceReconnect attempt=\(reconnectAttempts)")
+        // Cancel the (stale) connection. On the next attempt we scan for a fresh
+        // advertisement instead of reusing the system-cached connected peripheral,
+        // which is what carries the stale/empty GATT cache.
+        skipRetrieveConnectedOnce = reconnectAttempts >= 1
+        central.cancelPeripheralConnection(p)
+        // didDisconnect clears peripheral and triggers beginScan -> reconnect.
+    }
+
     private func beginScan() {
         guard wantScan else { return }
         guard central.state == .poweredOn else { return }
         onStatus?("scanning")
-        NSLog("[BleCentral] beginScan (filtered)")
+        dbg("beginScan (filtered)")
 
         // 1) Grab a peripheral already connected at the iOS system level
         //    (e.g. after the glasses app restarts) — connect directly.
-        let already = central.retrieveConnectedPeripherals(
-            withServices: [BleCentral.serviceUUID])
+        //    Skipped right after a stale-cache reconnect: the system-connected
+        //    peripheral is exactly what carries the stale GATT cache, so we must
+        //    fall through to a fresh advertisement scan instead.
+        let already = skipRetrieveConnectedOnce
+            ? []
+            : central.retrieveConnectedPeripherals(withServices: [BleCentral.serviceUUID])
+        skipRetrieveConnectedOnce = false
         if let p = already.first {
-            NSLog("[BleCentral] retrieveConnected -> \(p.name ?? "?")")
+            dbg("retrieveConnected -> \(p.name ?? "?")")
             self.peripheral = p
             p.delegate = self
             central.connect(p, options: nil)
@@ -161,7 +201,7 @@ final class BleCentral: NSObject {
         scanRetryTimer = Timer.scheduledTimer(withTimeInterval: 3.0, repeats: false) { [weak self] _ in
             guard let self = self else { return }
             guard self.wantScan, self.txChar == nil, self.peripheral == nil else { return }
-            NSLog("[BleCentral] widening to UNFILTERED scan")
+            dbg("widening to UNFILTERED scan")
             self.scanningUnfiltered = true
             self.central.scanForPeripherals(
                 withServices: nil,
@@ -201,6 +241,7 @@ final class BleCentral: NSObject {
 
 extension BleCentral: CBCentralManagerDelegate {
     func centralManagerDidUpdateState(_ central: CBCentralManager) {
+        dbg("didUpdateState raw=\(central.state.rawValue)")
         switch central.state {
         case .poweredOn:
             onStatus?("listening")
@@ -230,7 +271,7 @@ extension BleCentral: CBCentralManagerDelegate {
             if !matches { return }
         }
         guard self.peripheral == nil || self.peripheral?.identifier == peripheral.identifier else { return }
-        NSLog("[BleCentral] didDiscover \(peripheral.name ?? "?") rssi=\(RSSI) unfiltered=\(scanningUnfiltered)")
+        dbg("didDiscover \(peripheral.name ?? "?") rssi=\(RSSI) unfiltered=\(scanningUnfiltered)")
         central.stopScan()
         scanRetryTimer?.invalidate(); scanRetryTimer = nil
         self.peripheral = peripheral
@@ -240,7 +281,7 @@ extension BleCentral: CBCentralManagerDelegate {
 
     func centralManager(_ central: CBCentralManager,
                         didConnect peripheral: CBPeripheral) {
-        NSLog("[BleCentral] didConnect -> discoverServices")
+        dbg("didConnect -> discoverServices")
         maxWriteLen = peripheral.maximumWriteValueLength(for: .withoutResponse)
         peripheral.discoverServices([BleCentral.serviceUUID])
     }
@@ -248,6 +289,7 @@ extension BleCentral: CBCentralManagerDelegate {
     func centralManager(_ central: CBCentralManager,
                         didFailToConnect peripheral: CBPeripheral,
                         error: Error?) {
+        dbg("didFailToConnect err=\(error?.localizedDescription ?? "nil")")
         onStatus?("disconnected")
         if wantScan { beginScan() }
     }
@@ -255,7 +297,9 @@ extension BleCentral: CBCentralManagerDelegate {
     func centralManager(_ central: CBCentralManager,
                         didDisconnectPeripheral peripheral: CBPeripheral,
                         error: Error?) {
+        dbg("didDisconnect err=\(error?.localizedDescription ?? "nil")")
         stopPing()
+        self.peripheral = nil
         txChar = nil
         rxChar = nil
         rxBuffer.removeAll()
@@ -270,26 +314,42 @@ extension BleCentral: CBCentralManagerDelegate {
 
 extension BleCentral: CBPeripheralDelegate {
     func peripheral(_ peripheral: CBPeripheral, didDiscoverServices error: Error?) {
+        dbg("didDiscoverServices err=\(error?.localizedDescription ?? "nil") count=\(peripheral.services?.count ?? -1)")
         guard let services = peripheral.services else { return }
-        NSLog("[BleCentral] didDiscoverServices count=\(services.count)")
+        dbg("didDiscoverServices count=\(services.count)")
+        var foundOur = false
         for svc in services where svc.uuid == BleCentral.serviceUUID {
-            peripheral.discoverCharacteristics(
-                [BleCentral.txCharUUID, BleCentral.rxCharUUID], for: svc)
+            foundOur = true
+            // Pass nil to discover ALL characteristics. A specific list can come back
+            // empty when iOS serves a STALE cached GATT DB for this peripheral.
+            peripheral.discoverCharacteristics(nil, for: svc)
+        }
+        if !foundOur {
+            dbg("our service NOT in list -> stale cache, reconnecting")
+            forceReconnect()
         }
     }
 
     func peripheral(_ peripheral: CBPeripheral,
                     didDiscoverCharacteristicsFor service: CBService,
                     error: Error?) {
-        guard let chars = service.characteristics else { return }
+        let chars = service.characteristics ?? []
+        dbg("didDiscoverCharacteristicsFor uuid=\(service.uuid) err=\(error?.localizedDescription ?? "nil") count=\(chars.count)")
         for c in chars {
+            dbg("  char \(c.uuid) props=\(c.properties.rawValue)")
             if c.uuid == BleCentral.txCharUUID { txChar = c }
             if c.uuid == BleCentral.rxCharUUID {
                 rxChar = c
                 peripheral.setNotifyValue(true, for: c)
             }
         }
-        NSLog("[BleCentral] chars: tx=\(txChar != nil) rx=\(rxChar != nil)")
+        dbg("chars: tx=\(txChar != nil) rx=\(rxChar != nil)")
+        // Empty/mismatched characteristics == stale iOS GATT cache. Reconnect to refresh.
+        if (txChar == nil || rxChar == nil), chars.isEmpty {
+            dbg("empty chars -> stale cache, forceReconnect")
+            forceReconnect()
+            return
+        }
         if txChar != nil && rxChar != nil {
             let name = peripheral.name ?? peripheral.identifier.uuidString
             onStatus?("connected:\(name)")
