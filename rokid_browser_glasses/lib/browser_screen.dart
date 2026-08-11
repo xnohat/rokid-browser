@@ -261,24 +261,17 @@ class _BrowserScreenState extends State<BrowserScreen> {
     s.textContent='';
     return;
   }
-  // Capture the TRUE (zoom=1) CSS viewport width ONCE and reuse it, so repeated
-  // zoom steps don't compound a shrinking innerWidth into a wrong layout width.
-  if(!window.__rokidBaseVW){
-    // innerWidth is affected by the current zoom, so undo it to get the base.
-    var curZoom=parseFloat(de.style.zoom)||1;
-    window.__rokidBaseVW=Math.round((window.innerWidth||de.clientWidth||360)*curZoom);
-  }
-  de.style.setProperty('zoom','$zStr','important');
-  // Expand the layout width to (baseViewport / z) PIXELS so that, after the
-  // browser multiplies by the zoom factor z, the painted width == the physical
-  // viewport width (no right-hand gap).
-  var wpx=Math.round(window.__rokidBaseVW/$z);
+  // Use CSS transform:scale (NOT `zoom`, which clamps layout width to the
+  // viewport on WebView 95 and left the right half black). We scale <body> by z
+  // about its top-left corner and widen it to (100/z)% so the scaled result
+  // exactly fills the viewport width. This is the reliable reflow-free page zoom.
+  de.style.removeProperty('zoom');
   s.textContent=
-    'html{background:#000 !important;width:'+wpx+'px !important;min-width:'+wpx+'px !important;}'+
-    'body{width:'+wpx+'px !important;max-width:none !important;min-width:0 !important;'+
-      'margin:0 !important;}'+
-    ':focus{outline:none !important;}'+
-    'html,body{border:0 !important;}';
+    'html{background:#000 !important;overflow-x:hidden !important;}'+
+    'body{transform:scale($zStr) !important;transform-origin:top left !important;'+
+      'width:'+ (100/$z).toFixed(3) +'% !important;'+
+      'max-width:none !important;min-width:0 !important;margin:0 !important;}'+
+    ':focus{outline:none !important;}';
 })();''').catchError((_) {});
   }
 
