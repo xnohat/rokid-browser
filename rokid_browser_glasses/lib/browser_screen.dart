@@ -259,6 +259,9 @@ class _BrowserScreenState extends State<BrowserScreen> {
   if($z===1){
     de.style.removeProperty('zoom');
     s.textContent='';
+    // Unwrap: move children back out and remove the wrapper.
+    var wrap=document.getElementById('__rokidZoomWrap');
+    if(wrap){ while(wrap.firstChild){ document.body.insertBefore(wrap.firstChild, wrap); } wrap.remove(); }
     return;
   }
   // Use CSS transform:scale (NOT `zoom`, which clamps layout width to the
@@ -266,11 +269,21 @@ class _BrowserScreenState extends State<BrowserScreen> {
   // about its top-left corner and widen it to (100/z)% so the scaled result
   // exactly fills the viewport width. This is the reliable reflow-free page zoom.
   de.style.removeProperty('zoom');
+  var invW=(100/$z).toFixed(3);
+  // Apply the scale to a WRAPPER we insert directly under <html>, moving ALL of
+  // <body>'s children into it. Facebook constantly rewrites <body>'s own
+  // transform/width, but it never touches our wrapper, so the zoom sticks.
+  var wrap=document.getElementById('__rokidZoomWrap');
+  if(!wrap){
+    wrap=document.createElement('div');
+    wrap.id='__rokidZoomWrap';
+    while(document.body.firstChild){ wrap.appendChild(document.body.firstChild); }
+    document.body.appendChild(wrap);
+  }
+  wrap.style.cssText='transform:scale($zStr);transform-origin:top left;'+
+    'width:'+invW+'%;';
   s.textContent=
-    'html{background:#000 !important;overflow-x:hidden !important;}'+
-    'body{transform:scale($zStr) !important;transform-origin:top left !important;'+
-      'width:'+ (100/$z).toFixed(3) +'% !important;'+
-      'max-width:none !important;min-width:0 !important;margin:0 !important;}'+
+    'html,body{background:#000 !important;overflow-x:hidden !important;margin:0 !important;}'+
     ':focus{outline:none !important;}';
 })();''').catchError((_) {});
   }
