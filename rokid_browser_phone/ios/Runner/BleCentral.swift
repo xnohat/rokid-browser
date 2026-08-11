@@ -42,6 +42,7 @@ final class BleCentral: NSObject {
 
     // Keepalive
     private var pingTimer: Timer?
+    private var scanRetryTimer: Timer?
     private let pingLine = "{\"type\":\"ping\"}\n"
 
     override init() {
@@ -128,9 +129,45 @@ final class BleCentral: NSObject {
 
     private func beginScan() {
         guard wantScan else { return }
+        guard central.state == .poweredOn else { return }
         onStatus?("scanning")
         NSLog("[BleCentral] beginScan for service")
-        central.scanForPeripherals(withServices: [BleCentral.serviceUUID], options: nil)
+
+        // 1) The glasses may already be connected at the iOS system level
+        //    (e.g. after the glasses app restarts) — grab it directly instead of
+        //    waiting for a fresh advertisement, which iOS may not surface.
+        let already = central.retrieveConnectedPeripherals(
+            withServices: [BleCentral.serviceUUID])
+        if let p = already.first {
+            NSLog("[BleCentral] retrieveConnected -> \(p.name ?? "?")")
+            central.stopScan()
+            self.peripheral = p
+            p.delegate = self
+            central.connect(p, options: nil)
+            scheduleScanRetry()
+            return
+        }
+
+        // 2) Otherwise scan. AllowDuplicates lets us re-detect a peripheral that
+        //    re-advertised after a restart within the same scan session.
+        central.scanForPeripherals(
+            withServices: [BleCentral.serviceUUID],
+            options: [CBCentralManagerScanOptionAllowDuplicatesKey: false])
+        scheduleScanRetry()
+    }
+
+    /// If we are still not connected after a few seconds, restart the scan.
+    /// This is what makes reconnect reliable when the glasses app is relaunched
+    /// (the old advertisement is gone and iOS otherwise sits idle on the stale scan).
+    private func scheduleScanRetry() {
+        scanRetryTimer?.invalidate()
+        scanRetryTimer = Timer.scheduledTimer(withTimeInterval: 4.0, repeats: false) { [weak self] _ in
+            guard let self = self else { return }
+            guard self.wantScan, self.txChar == nil else { return } // not connected yet
+            NSLog("[BleCentral] scan retry (still not connected)")
+            self.central.stopScan()
+            self.beginScan()
+        }
     }
 
     private func startPing() {
@@ -244,6 +281,7 @@ extension BleCentral: CBPeripheralDelegate {
         if txChar != nil && rxChar != nil {
             let name = peripheral.name ?? peripheral.identifier.uuidString
             onStatus?("connected:\(name)")
+            scanRetryTimer?.invalidate(); scanRetryTimer = nil
             startPing()
         }
     }
