@@ -147,19 +147,11 @@ class _BrowserScreenState extends State<BrowserScreen> {
           await _applyHudInset();
           // Re-apply after zoom/viewport change triggers Google's layout re-check
           await _applyTheme(_isDark);
-          // Deterministic CSS dark pass (covers sites native force-dark misses,
-          // e.g. m.facebook.com) — no invert filter, so low GPU cost.
-          if (_isDark) {
-            await _applyHardDark();
-            // Facebook & other SPA feeds render cards lazily after load; re-run the
-            // pass a couple of times (NOT a continuous interval → stays cool).
-            Future.delayed(const Duration(milliseconds: 900), () {
-              if (mounted && _isDark) _applyHardDark();
-            });
-            Future.delayed(const Duration(milliseconds: 2500), () {
-              if (mounted && _isDark) _applyHardDark();
-            });
-          }
+          // Dark mode: rely ONLY on the WebView's native force-dark (applied in
+          // _applyTheme). Sites that ship / support dark get darkened; sites that
+          // don't (Facebook) are left in their original colors instead of being
+          // force-recolored by CSS (which looked washed-out and was heavy). The
+          // brightness slider handles glare/heat for bright pages.
 
           final title = await _webController.getTitle() ?? '';
           final canGoBack = await _webController.canGoBack();
@@ -242,35 +234,34 @@ class _BrowserScreenState extends State<BrowserScreen> {
   /// (settings.textZoom, in %) which reflows content to the viewport width —
   /// unlike CSS `body.zoom` which scaled the box and left black gaps / overflow.
   void _applyZoom() {
-    // True reflow-zoom like a desktop browser: change the LAYOUT viewport width.
-    // The device screen is ~480 CSS px. If we tell the page the viewport is
-    // (480 / zoom) wide, the browser lays the page out at that width and then
-    // scales it to fill the screen — so content reflows to fit with NO sideways
-    // scroll. zoom>1 → narrower layout width → content looks bigger; zoom<1 →
-    // wider layout width → more content, smaller. Works even on sites that hard
-    // code width=device-width because we overwrite their viewport meta.
-    // CSS viewport width of this display is ~320 (480 physical px / 1.5 density).
-    // Lay the page out at (320 / zoom): zoom>1 → narrower layout → content bigger;
-    // zoom<1 → wider layout → more content, smaller. With useWideViewPort +
-    // loadWithOverviewMode, the WebView scales that layout width to fill the
-    // screen, so it reflows to fit with NO horizontal scroll. No initial-scale —
-    // that overrides the auto-fit and leaves black gaps.
+    // Zoom = reader-style TEXT zoom only. The viewport / layout width stays
+    // exactly as the page shipped it (width=device-width) — we NEVER touch the
+    // viewport meta here, so the frame keeps filling the screen; only the text
+    // (and text-sized elements) grow/shrink, like a browser's text-size control.
+    final pct = (_pageZoom * 100).round().clamp(50, 200);
+    // Text scales via native textZoom (keeps the layout viewport = full screen).
+    _methodChannel.invokeMethod('setTextZoom', pct).catchError((_) {});
+    // Also scale images / media / icons by the same factor so they shrink/grow
+    // together with the text (the user wanted elements to zoom too, not just text)
+    // — WITHOUT touching the viewport width, so the page frame still fills the
+    // screen. transform:scale keeps them in normal flow via transform-origin.
     final z = _pageZoom;
-    const baseWidth = 320;
-    final layoutWidth = (baseWidth / z).round();
     _webController.runJavaScript('''
 (function(){
+  var s=document.getElementById('__rokidZoomFit'); if(s)s.remove();
   var m=document.querySelector('meta[name="viewport"]');
-  if(!m){m=document.createElement('meta');m.name='viewport';(document.head||document.documentElement).appendChild(m);}
-  m.setAttribute('content','width=$layoutWidth');
-  window.__rokidVW=$layoutWidth;
-  // Stop wide fixed-width elements from overflowing the (now narrower) layout so
-  // the page truly reflows to fit — no right-edge clipping.
-  var s=document.getElementById('__rokidZoomFit');
-  if(!s){s=document.createElement('style');s.id='__rokidZoomFit';(document.head||document.documentElement).appendChild(s);}
-  s.textContent='html,body{overflow-x:hidden !important;}'+
-    '*{max-width:100vw !important;}'+
-    'img,video,iframe,canvas{height:auto !important;}';
+  if(m)m.setAttribute('content','width=device-width,initial-scale=1.0');
+  var z=$z;
+  var d=document.getElementById('__rokidMediaZoom');
+  if(!d){d=document.createElement('style');d.id='__rokidMediaZoom';(document.head||document.documentElement).appendChild(d);}
+  if(z===1){d.textContent='';}
+  else{
+    // Scale replaced elements (images/videos/svg/icons) about their top-left so
+    // they resize with the text but keep flowing; max-width guard prevents any
+    // horizontal overflow.
+    d.textContent='img,video,svg,picture,canvas{zoom:'+z+' !important;}'+
+      'img,video,svg,picture,canvas{max-width:100% !important;height:auto !important;}';
+  }
 })();''').catchError((_) {});
   }
 
@@ -363,7 +354,7 @@ class _BrowserScreenState extends State<BrowserScreen> {
   if(!s){s=document.createElement('style');s.id='__rokidDark';
     (document.head||document.documentElement).appendChild(s);}
   s.textContent=
-    'html,body{background:#000 !important;color:#d0d0d0 !important;}'+
+    'html,body{background:#000 !important;color:#f5f5f5 !important;}'+
     'a{color:#8ab4f8 !important;}'+
     // Force common white surfaces dark. div/section/article/etc. that sites use
     // for cards. Media and form controls are excluded further down.
@@ -387,7 +378,7 @@ class _BrowserScreenState extends State<BrowserScreen> {
       if(bg&&bg.a>=0.3&&bg.L>150)el.style.setProperty('background-color','#0f0f0f','important');
     }
     var fg=lum(cs.color);
-    if(fg&&fg.a>=0.3&&fg.L<90)el.style.setProperty('color','#d5d5d5','important');
+    if(fg&&fg.a>=0.3&&fg.L<90)el.style.setProperty('color','#f5f5f5','important');
   }
   function pass(root){
     var all=root.querySelectorAll('*');
@@ -418,10 +409,36 @@ class _BrowserScreenState extends State<BrowserScreen> {
       await _methodChannel.invokeMethod('setForceDark', dark);
     } catch (_) {}
     if (dark) {
+      // Only HINT dark mode: set prefers-color-scheme:dark + neutralize any light
+      // color-scheme meta, so sites THAT SUPPORT dark switch to it. We do NOT
+      // force-recolor arbitrary elements anymore (that made Facebook washed-out
+      // and ran a heavy 400ms loop). Native WebView force-dark already ran above.
+      await _webController.runJavaScript(r'''
+(function(){
+  if(window.__rokidThemeInterval){clearInterval(window.__rokidThemeInterval);window.__rokidThemeInterval=null;}
+  try{
+    var _o=window.__rokidOrigMM||(window.__rokidOrigMM=window.matchMedia);
+    window.matchMedia=function(q){
+      if(typeof q==='string'&&q.indexOf('prefers-color-scheme')>=0)
+        return{matches:q.replace(/\s/g,'').indexOf('dark')>=0,media:q,onchange:null,
+          addListener:function(){},removeListener:function(){},
+          addEventListener:function(){},removeEventListener:function(){},
+          dispatchEvent:function(){return false;}};
+      return _o.call(this,q);
+    };
+    var meta=document.querySelector('meta[name="color-scheme"]');
+    if(!meta&&document.head){meta=document.createElement('meta');meta.name='color-scheme';document.head.appendChild(meta);}
+    if(meta)meta.content='dark';
+    document.documentElement.style.colorScheme='dark';
+  }catch(e){}
+})();''');
+      return;
+    }
+    // (light branch below)
+    if (false) {
       await _webController.runJavaScript(r'''
 (function(){
   if(window.__rokidThemeInterval)clearInterval(window.__rokidThemeInterval);
-  // Defined once outside enforce() — recreating closures every 400ms is wasteful
   var _skip={SCRIPT:1,STYLE:1,VIDEO:1,CANVAS:1,IMG:1,HEAD:1,LINK:1,META:1,NOSCRIPT:1,INPUT:1,TEXTAREA:1};
   var _svg={PATH:1,CIRCLE:1,RECT:1,POLYGON:1,POLYLINE:1,LINE:1,ELLIPSE:1,USE:1,G:1,SVG:1,SYMBOL:1};
   // #808080 is readable on both dark and light backgrounds — avoids the need for
@@ -431,8 +448,8 @@ class _BrowserScreenState extends State<BrowserScreen> {
     for(var i=0;i<all.length;i++){
       var el=all[i];
       if(!_skip[el.tagName]){
-        el.style.setProperty('color','#808080','important');
-        if(_svg[el.tagName])el.style.setProperty('fill','#808080','important');
+        el.style.setProperty('color','#f0f0f0','important');
+        if(_svg[el.tagName])el.style.setProperty('fill','#f0f0f0','important');
       }
       if(el.shadowRoot)_walk(el.shadowRoot);
     }
@@ -460,7 +477,7 @@ class _BrowserScreenState extends State<BrowserScreen> {
     // that read CSS custom properties (these do cross shadow DOM boundaries).
     var s=document.getElementById('__rk');
     if(!s&&document.head){s=document.createElement('style');s.id='__rk';document.head.appendChild(s);}
-    if(s)s.textContent=':root{color-scheme:dark!important;--yt-spec-text-secondary:#808080!important;--yt-spec-text-disabled:#808080!important;--yt-spec-icon-inactive:#808080!important;--yt-spec-icon-disabled:#808080!important;}html,body{background:#000!important;color:#808080!important;}';
+    if(s)s.textContent=':root{color-scheme:dark!important;--yt-spec-text-secondary:#808080!important;--yt-spec-text-disabled:#808080!important;--yt-spec-icon-inactive:#808080!important;--yt-spec-icon-disabled:#808080!important;}html,body{background:#000!important;color:#f0f0f0!important;}';
     // Framework-specific dark attributes (YouTube reads `dark`, many CMSes read data-theme)
     document.documentElement.setAttribute('dark','');
     document.documentElement.setAttribute('data-theme','dark');
